@@ -13,9 +13,10 @@ cheaply.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from attest.harness.engine import EngineClient
 from attest.harness.ledger import Ledger
@@ -103,15 +104,13 @@ def run_skeleton(
             engine=engine_state,
             sampling=sampling,
             output=completion.to_output_record(),
-            run=RunRef(
-                run_id=manifest.run_id, cell_id=cell_id, timestamp_utc=iso(utc_now())
-            ),
+            run=RunRef(run_id=manifest.run_id, cell_id=cell_id, timestamp_utc=iso(utc_now())),
         )
         _emit_receipt(receipt, receipts_dir, use_test_key=use_test_key)
 
         ledger.mark_done(cell_id, str(raw_path.relative_to(run_dir)))
         cells_done = 1
-    except Exception as exc:  # noqa: BLE001 - recorded, then re-raised
+    except Exception as exc:
         ledger.mark_failed(cell_id, f"{type(exc).__name__}: {exc}")
         cells_failed = 1
         _write_manifest(manifest, run_dir, 1, cells_done, cells_failed)
@@ -146,9 +145,7 @@ def _emit_receipt(receipt: Receipt, receipts_dir: Path, *, use_test_key: bool) -
     return receipt_path
 
 
-def _write_manifest(
-    manifest: Manifest, run_dir: Path, total: int, done: int, failed: int
-) -> None:
+def _write_manifest(manifest: Manifest, run_dir: Path, total: int, done: int, failed: int) -> None:
     manifest.finalize(cells_total=total, cells_done=done, cells_failed=failed).write(
         run_dir / "manifest.json"
     )

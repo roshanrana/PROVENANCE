@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -17,7 +17,7 @@ from common.runid import (
     new_run_id,
 )
 
-FIXED = datetime(2026, 8, 29, 14, 30, 5, tzinfo=timezone.utc)
+FIXED = datetime(2026, 8, 29, 14, 30, 5, tzinfo=UTC)
 
 
 def _init_repo(path: Path, *, dirty: bool = False) -> None:
@@ -126,7 +126,9 @@ def test_manifest_rejects_unknown_workstream() -> None:
         Manifest.from_dict(doc)
 
 
-def test_write_is_atomic_and_leaves_no_partial_file(tmp_path: Path, monkeypatch) -> None:
+def test_write_is_atomic_and_leaves_no_partial_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """If the replace step fails, the target must not exist and no temp file may survive.
 
     A half-written manifest is worse than none: it looks like evidence.

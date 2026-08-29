@@ -15,16 +15,17 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Mapping
+from typing import Any
 
 from common.runid import iso, utc_now
 
 
-class CellState(str, Enum):
+class CellState(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
     DONE = "done"
@@ -176,4 +177,4 @@ class Ledger:
 
 
 def now_iso() -> str:
-    return iso(datetime.now(timezone.utc))
+    return iso(datetime.now(UTC))

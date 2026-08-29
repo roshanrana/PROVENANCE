@@ -12,9 +12,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence, TextIO
+from typing import TextIO
 
 from attest.receipt.schema import Receipt, ReceiptSchemaError, SubjectDigestMismatch
 from attest.receipt.sign import (
@@ -157,9 +158,7 @@ def main(argv: Sequence[str] | None = None, *, out: TextIO | None = None) -> int
             paths = Paths(paths.receipt, args.signature, paths.public_key)
         if args.public_key is not None:
             paths = Paths(paths.receipt, paths.signature, args.public_key)
-        return _verify(
-            paths, allow_test_key=args.allow_test_key, online=args.online, out=stream
-        )
+        return _verify(paths, allow_test_key=args.allow_test_key, online=args.online, out=stream)
 
     raise AssertionError(f"unhandled command: {args.command!r}")  # pragma: no cover
 

@@ -16,8 +16,9 @@ Two design points carry the weight here:
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, ClassVar, Literal
 
 STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
 PREDICATE_TYPE = "https://provenance.dev/attestation/v0.1"
@@ -107,7 +108,7 @@ class EngineState:
     speculative_decoding: bool
     tensor_parallel_size: int
 
-    _FIELDS = {
+    _FIELDS: ClassVar[set[str]] = {
         "vllm_version",
         "vllm_git_sha",
         "resolved_config",
@@ -218,9 +219,7 @@ class RunRef:
         _reject_unknown(doc, {"run_id", "cell_id", "timestamp_utc"}, "run")
         for key in ("run_id", "cell_id", "timestamp_utc"):
             _require(doc, key, "run")
-        return cls(
-            run_id=doc["run_id"], cell_id=doc["cell_id"], timestamp_utc=doc["timestamp_utc"]
-        )
+        return cls(run_id=doc["run_id"], cell_id=doc["cell_id"], timestamp_utc=doc["timestamp_utc"])
 
 
 def subject_digest(token_ids: Sequence[int]) -> str:

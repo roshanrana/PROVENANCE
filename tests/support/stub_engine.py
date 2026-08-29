@@ -25,10 +25,11 @@ import hashlib
 import json
 import threading
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Iterator, Literal
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 DivergenceMode = Literal["none", "batch_dependent", "random"]
@@ -95,7 +96,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_GET(self) -> None:  # noqa: N802 - stdlib naming
+    def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path == "/version":
             self._send(200, {"version": VERSION, "git_sha": GIT_SHA})
@@ -122,7 +123,7 @@ class _Handler(BaseHTTPRequestHandler):
         else:
             self._send(404, {"error": f"no such path: {path}"})
 
-    def do_POST(self) -> None:  # noqa: N802 - stdlib naming
+    def do_POST(self) -> None:
         path = urlparse(self.path).path
         if path != "/v1/completions":
             self._send(404, {"error": f"no such path: {path}"})
@@ -198,7 +199,8 @@ def stub_engine(config: StubConfig | None = None) -> Iterator[RunningStub]:
     thread.start()
     try:
         host, port = server.server_address[:2]
-        yield RunningStub(url=f"http://{host}:{port}", state=state)
+        hostname = host.decode() if isinstance(host, bytes) else str(host)
+        yield RunningStub(url=f"http://{hostname}:{port}", state=state)
     finally:
         server.shutdown()
         server.server_close()

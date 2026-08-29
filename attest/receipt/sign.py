@@ -13,9 +13,10 @@ module refuses to sign a non-test receipt with it.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
@@ -123,9 +124,7 @@ def sign_statement(
     return key.sign(canonical_bytes(statement))
 
 
-def verify_statement(
-    statement: Mapping[str, Any], signature: bytes, key: Ed25519PublicKey
-) -> None:
+def verify_statement(statement: Mapping[str, Any], signature: bytes, key: Ed25519PublicKey) -> None:
     """Raise :class:`SignatureInvalid` unless *signature* covers *statement*.
 
     The canonical bytes are recomputed from the parsed document, so this is

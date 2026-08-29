@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -19,13 +20,20 @@ from attest.receipt.provenance import HubUnreachable, resolve_model_identity
 from attest.receipt.sign import (
     generate_private_key,
     sign_statement,
-    test_private_key as fixture_private_key,
     write_public_key,
+)
+from attest.receipt.sign import (
+    test_private_key as fixture_private_key,
 )
 from tests.attest.test_receipt_schema import make_receipt
 
 
-def _write_bundle(tmp_path: Path, *, use_test_key: bool = False, statement=None) -> Path:
+def _write_bundle(
+    tmp_path: Path,
+    *,
+    use_test_key: bool = False,
+    statement: dict[str, Any] | None = None,
+) -> Path:
     key = fixture_private_key() if use_test_key else generate_private_key()
     doc = statement if statement is not None else make_receipt().to_statement()
     receipt = tmp_path / "receipt.json"
@@ -146,9 +154,7 @@ def test_hub_unreachable_exits_five_and_says_offline_passed(
     assert "offline verification passed" in text
 
 
-def test_identity_divergence_exits_six(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_identity_divergence_exits_six(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     receipt = _write_bundle(tmp_path)
     from attest.receipt import provenance as prov
 
@@ -161,9 +167,7 @@ def test_identity_divergence_exits_six(
     assert "commit_sha" in text
 
 
-def test_identity_agreement_exits_zero(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_identity_agreement_exits_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     receipt = _write_bundle(tmp_path)
     from attest.receipt import provenance as prov
 
@@ -220,14 +224,15 @@ def test_resolution_extracts_commit_sha_and_lfs_digest() -> None:
 
 def test_http_error_becomes_hub_unreachable() -> None:
     transport = httpx.MockTransport(lambda _req: httpx.Response(503))
-    with httpx.Client(transport=transport) as client:
-        with pytest.raises(HubUnreachable):
-            resolve_model_identity("Qwen/Qwen2.5-0.5B-Instruct", client=client)
+    with httpx.Client(transport=transport) as client, pytest.raises(HubUnreachable):
+        resolve_model_identity("Qwen/Qwen2.5-0.5B-Instruct", client=client)
 
 
 def test_weights_without_lfs_digest_is_unreachable_not_silently_empty() -> None:
     payload = {"sha": "a" * 40, "siblings": [{"rfilename": "model.safetensors"}]}
     transport = httpx.MockTransport(lambda _req: httpx.Response(200, json=payload))
-    with httpx.Client(transport=transport) as client:
-        with pytest.raises(HubUnreachable, match="LFS sha256"):
-            resolve_model_identity("Qwen/Qwen2.5-0.5B-Instruct", client=client)
+    with (
+        httpx.Client(transport=transport) as client,
+        pytest.raises(HubUnreachable, match="LFS sha256"),
+    ):
+        resolve_model_identity("Qwen/Qwen2.5-0.5B-Instruct", client=client)

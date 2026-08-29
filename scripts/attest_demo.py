@@ -20,9 +20,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from attest.harness.skeleton import run_skeleton  # noqa: E402
-from attest.receipt import cli  # noqa: E402
-from tests.support.stub_engine import StubConfig, stub_engine  # noqa: E402
+from attest.harness.skeleton import run_skeleton
+from attest.receipt import cli
+from tests.support.stub_engine import StubConfig, stub_engine
 
 
 def main() -> int:

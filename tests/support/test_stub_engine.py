@@ -7,15 +7,23 @@ inherit its error while appearing to pass.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 import httpx
 
 from tests.support.stub_engine import StubConfig, stub_engine
 
 
-def _complete(url: str, prompt: str = "hello", **extra: object) -> dict:
-    payload = {"prompt": prompt, "seed": 0, "temperature": 0.0, "max_tokens": 8, **extra}
-    return httpx.post(f"{url}/v1/completions", json=payload, timeout=10).json()
+def _complete(url: str, prompt: str = "hello", **extra: object) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "prompt": prompt,
+        "seed": 0,
+        "temperature": 0.0,
+        "max_tokens": 8,
+        **extra,
+    }
+    body: dict[str, Any] = httpx.post(f"{url}/v1/completions", json=payload, timeout=10).json()
+    return body
 
 
 def test_determinism_mode_none_is_byte_identical() -> None:

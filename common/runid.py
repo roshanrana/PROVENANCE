@@ -15,10 +15,11 @@ import os
 import re
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, Mapping
+from typing import Any, Literal
 
 Workstream = Literal["attest", "barrier"]
 
@@ -67,7 +68,7 @@ def git_state(cwd: Path | None = None) -> tuple[str, bool]:
 
 def utc_now() -> datetime:
     """Current UTC time, seconds precision. Injectable seam for tests (NFR-03)."""
-    return datetime.now(timezone.utc).replace(microsecond=0)
+    return datetime.now(UTC).replace(microsecond=0)
 
 
 def new_run_id(
@@ -78,7 +79,7 @@ def new_run_id(
     cwd: Path | None = None,
 ) -> str:
     """Build a run-id. Pure given *now* and *git_sha*."""
-    stamp = (now or utc_now()).astimezone(timezone.utc).strftime(_TIMESTAMP_FMT)
+    stamp = (now or utc_now()).astimezone(UTC).strftime(_TIMESTAMP_FMT)
     sha = git_sha if git_sha is not None else git_state(cwd)[0]
     run_id = f"{workstream}-{stamp}-{sha}"
     if not RUN_ID_RE.match(run_id):
@@ -88,7 +89,7 @@ def new_run_id(
 
 def iso(ts: datetime) -> str:
     """UTC, ISO-8601, seconds precision, ``Z`` suffix."""
-    return ts.astimezone(timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return ts.astimezone(UTC).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @dataclass(frozen=True)

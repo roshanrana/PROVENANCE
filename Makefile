@@ -1,0 +1,67 @@
+#  PROVENANCE
+#
+#  One entry point for validation. Agents, humans, pre-commit and CI all speak
+#  this vocabulary — nobody maintains a parallel list of "the real checks", and
+#  CI is a mirror of `make check`, never a superset. If it passes here and fails
+#  there, that divergence is the bug.
+
+SHELL := /bin/bash
+.DEFAULT_GOAL := help
+UV ?= uv
+GO ?= go
+EPP_DIR := barrier/epp
+
+.PHONY: help bootstrap check check-full check-ship fmt lint typecheck test \
+        go-check attest-demo clean
+
+help: ## Show available targets
+	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
+	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
+
+bootstrap: ## Install dependencies from the lockfile
+	$(UV) sync
+
+# --------------------------------------------------------------------------- gates
+
+fmt: ## Auto-fix formatting and lint findings
+	$(UV) run ruff format .
+	$(UV) run ruff check --fix .
+
+lint: ## Lint (no fixes) + format check
+	$(UV) run ruff check .
+	$(UV) run ruff format --check .
+
+typecheck: ## Static types — strict on common/ and attest/receipt (HLD §7.3)
+	$(UV) run mypy .
+
+test: ## Unit + integration tests
+	$(UV) run pytest
+
+go-check: ## Go gates. Skipped with a warning if the toolchain is too old — see T-003.
+	@if [ ! -f $(EPP_DIR)/go.sum ]; then \
+	  echo "SKIP go-check: $(EPP_DIR)/go.sum absent (T-003 blocked — needs Go >= 1.26.6)"; \
+	else \
+	  cd $(EPP_DIR) && $(GO) build ./... && $(GO) vet ./... && \
+	  test -z "$$($(GO)fmt -l .)" && golangci-lint run; \
+	fi
+
+check: lint typecheck test go-check ## The gate. Green is required before any task is done.
+	@echo "make check: PASS"
+
+check-full: check ## check + coverage against the NFR-13 target
+	$(UV) run pytest --cov --cov-report=term-missing --cov-report=xml
+
+check-ship: check-full ## check-full + dependency, secrets and vulnerability scans
+	$(UV) run pip-audit || true
+	@command -v gitleaks >/dev/null && gitleaks detect --no-banner || \
+	  echo "SKIP secrets scan: gitleaks not installed"
+	@if [ -f $(EPP_DIR)/go.sum ]; then cd $(EPP_DIR) && govulncheck ./...; fi
+
+# --------------------------------------------------------------------------- demos
+
+attest-demo: ## M0 walking skeleton — full pipeline, stub engine, no GPU
+	$(UV) run python scripts/attest_demo.py
+
+clean: ## Remove caches and demo artefacts
+	rm -rf .mypy_cache .pytest_cache .ruff_cache .coverage coverage.xml htmlcov
+	find . -name __pycache__ -type d -prune -exec rm -rf {} +

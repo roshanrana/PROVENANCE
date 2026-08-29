@@ -37,6 +37,10 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM", "TID", "RUF"]
+# N818 wants every exception to end in "Error". SignatureInvalid, HubUnreachable
+# and SigningRefused describe the *condition* and read better at call sites, which
+# is where exception names actually get read.
+ignore = ["N818"]
 
 # common/ is a leaf (LLD §2). It must never import from the workstream packages —
 # doing so would couple ATTEST and BARRIER, which must ship independently (D-04).
@@ -49,6 +53,7 @@ select = ["E", "F", "I", "N", "UP", "B", "SIM", "TID", "RUF"]
 "attest/**" = ["TID251"]
 "barrier/**" = ["TID251"]
 "tests/**" = ["TID251"]
+"scripts/**" = ["TID251", "E402"]
 
 # ---------------------------------------------------------------------------
 # mypy — strict where a silent type error would corrupt a published number.

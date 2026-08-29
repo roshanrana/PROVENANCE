@@ -9,8 +9,9 @@ control — which is the difference between an attestation and a log line.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 import httpx
 

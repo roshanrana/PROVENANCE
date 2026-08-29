@@ -1,0 +1,57 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "predicate": {
+    "engine": {
+      "attention_backend": "FLASH_ATTN",
+      "batch_invariant": true,
+      "prefix_caching": false,
+      "resolved_config": {
+        "cudagraph_mode": "PIECEWISE",
+        "enforce_eager": false
+      },
+      "speculative_decoding": false,
+      "tensor_parallel_size": 1,
+      "vllm_git_sha": "deadbee",
+      "vllm_version": "0.11.0"
+    },
+    "model": {
+      "commit_sha": "7ae557604adf67be50417f59c2c2f167def9a775",
+      "hub": "huggingface",
+      "repo_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "resolution": "online",
+      "weights": {
+        "file": "model.safetensors",
+        "lfs_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      }
+    },
+    "output": {
+      "logprobs_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "text": "Hello, world",
+      "token_ids": [
+        9707,
+        11,
+        1879
+      ]
+    },
+    "run": {
+      "cell_id": "c0001",
+      "run_id": "attest-20260829T143005Z-abc1234",
+      "timestamp_utc": "2026-08-29T14:30:05Z"
+    },
+    "sampling": {
+      "max_tokens": 256,
+      "seed": 0,
+      "temperature": 0.0,
+      "top_p": 1.0
+    }
+  },
+  "predicateType": "https://provenance.dev/attestation/v0.1",
+  "subject": [
+    {
+      "digest": {
+        "sha256": "70474b1ba35d2f9ec35e74307a0b301a1f5eeb8824fd3e97dbbd2ba114bf282b"
+      },
+      "name": "inference-output"
+    }
+  ]
+}

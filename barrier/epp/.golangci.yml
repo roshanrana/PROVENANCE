@@ -1,0 +1,10 @@
+version: "2"
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - revive
+    # gosec matters here: this module handles the HMAC salt secret (LLD §4.3).
+    - gosec

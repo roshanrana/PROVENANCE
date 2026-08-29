@@ -11,7 +11,12 @@ from typing import Any
 
 import httpx
 
-from tests.support.stub_engine import StubConfig, stub_engine
+from tests.support.stub_engine import (
+    StubConfig,
+    _bucket_for,
+    _tokens_for,
+    stub_engine,
+)
 
 
 def _complete(url: str, prompt: str = "hello", **extra: object) -> dict[str, Any]:
@@ -34,18 +39,46 @@ def test_determinism_mode_none_is_byte_identical() -> None:
     assert a["logprobs"] == b["logprobs"]
 
 
-def test_batch_dependent_mode_diverges_under_concurrency() -> None:
-    """Identical requests, different concurrency, different output — the phenomenon."""
-    with stub_engine(StubConfig(divergence_mode="batch_dependent")) as stub:
-        serial = _complete(stub.url)["choices"][0]["token_ids"]
+def test_bucket_boundaries_model_kernel_batch_shapes() -> None:
+    """The divergence *logic*, tested deterministically — no threads involved.
 
+    Buckets stand in for the batch shapes at which real kernels switch reduction
+    strategy. Testing this directly is what makes the HTTP-level test below able
+    to be loose without leaving the behaviour unverified.
+    """
+    assert [_bucket_for(n) for n in (1, 2, 4, 5, 8, 9, 64)] == [0, 1, 1, 2, 2, 3, 3]
+
+
+def test_identical_requests_diverge_across_batch_shapes() -> None:
+    """Same prompt, same seed, different batch shape, different tokens.
+
+    This is the phenomenon ATTEST exists to measure, and at this level it is a
+    pure function — so it is checked exactly rather than by racing threads.
+    """
+    variants = {tuple(_tokens_for("p", 0, bucket, 8)) for bucket in range(4)}
+    assert len(variants) == 4
+
+
+def test_concurrency_reaches_non_serial_buckets_over_http() -> None:
+    """Wiring check: under real load the server does reach a larger batch shape.
+
+    Deliberately a weak assertion. An earlier version of this test pinned an
+    exact bucket and failed about one run in four, because HTTP connection
+    lifecycle decides how many requests genuinely overlap. The exact behaviour is
+    covered by the two pure-function tests above; this one only has to prove the
+    path is wired up, so it asserts the least it can get away with.
+    """
+    config = StubConfig(
+        divergence_mode="batch_dependent", latency_profile="fixed", fixed_latency_s=0.05
+    )
+    with stub_engine(config) as stub:
         with ThreadPoolExecutor(max_workers=12) as pool:
-            results = [f.result() for f in [pool.submit(_complete, stub.url) for _ in range(12)]]
+            futures = [pool.submit(_complete, stub.url) for _ in range(12)]
+            results = [f.result() for f in futures]
+        peak = stub.state.peak_inflight
 
-        assert stub.state.peak_inflight > 1, "test did not actually achieve concurrency"
-        concurrent_variants = {tuple(r["choices"][0]["token_ids"]) for r in results}
-
-    assert tuple(serial) not in concurrent_variants or len(concurrent_variants) > 1
+    assert peak > 1, f"no overlap achieved at all (peak_inflight={peak})"
+    assert {r["_stub"]["bucket"] for r in results} != {0}, "never left the serial bucket"
 
 
 def test_batch_dependent_mode_is_reproducible_for_a_fixed_bucket() -> None:

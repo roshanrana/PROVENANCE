@@ -52,6 +52,13 @@ class StubConfig:
     )
     latency_profile: Literal["instant", "fixed", "jittered"] = "instant"
     fixed_latency_s: float = 0.0
+    #: Block each request until this many are in flight. Makes concurrency a
+    #: guarantee rather than a scheduler coincidence, so tests that need overlap
+    #: are deterministic instead of flaky.
+    hold_until_inflight: int = 0
+    #: Deliberately shorter than any client timeout, so a barrier that cannot be
+    #: satisfied surfaces as a failed assertion rather than a client read timeout.
+    hold_timeout_s: float = 3.0
     batch_invariant: bool = False
     prefix_caching: bool = False
 
@@ -62,7 +69,7 @@ class _State:
         self.inflight = 0
         self.peak_inflight = 0
         self.requests = 0
-        self.lock = threading.Lock()
+        self.lock = threading.Condition()
 
 
 def _tokens_for(prompt: str, seed: int, bucket: int, n: int) -> list[int]:
@@ -71,14 +78,18 @@ def _tokens_for(prompt: str, seed: int, bucket: int, n: int) -> list[int]:
     return [1000 + digest[i % len(digest)] for i in range(n)]
 
 
-def _concurrency_bucket(state: _State, mode: DivergenceMode) -> int:
+def _bucket_for(batch_size: int) -> int:
+    """Buckets mirror how real kernels pick reduction strategies at different
+    batch shapes: 1, 2-4, 5-8, 9+."""
+    n = batch_size
+    return 0 if n <= 1 else 1 if n <= 4 else 2 if n <= 8 else 3
+
+
+def _concurrency_bucket(state: _State, mode: DivergenceMode, *, batch_size: int) -> int:
     if mode == "none":
         return 0
     if mode == "batch_dependent":
-        # Buckets mirror how real kernels pick reduction strategies at different
-        # batch shapes: 1, 2-4, 5-8, 9+.
-        n = state.inflight
-        return 0 if n <= 1 else 1 if n <= 4 else 2 if n <= 8 else 3
+        return _bucket_for(batch_size)
     return state.requests  # "random": different every call
 
 
@@ -141,7 +152,21 @@ class _Handler(BaseHTTPRequestHandler):
             state.inflight += 1
             state.requests += 1
             state.peak_inflight = max(state.peak_inflight, state.inflight)
-            bucket = _concurrency_bucket(state, state.config.divergence_mode)
+            target = state.config.hold_until_inflight
+            batch_size = state.inflight
+            if target > 1:
+                state.lock.notify_all()
+                reached = state.lock.wait_for(
+                    lambda: state.inflight >= target, timeout=state.config.hold_timeout_s
+                )
+                state.peak_inflight = max(state.peak_inflight, state.inflight)
+                # The barrier defines the batch shape. Reading `inflight` after
+                # waking would race: peers wake at different moments and some
+                # have already finished, so each caller would see a different
+                # number and land in a different bucket — which is precisely the
+                # non-determinism this fixture is meant to control, not exhibit.
+                batch_size = target if reached else state.inflight
+            bucket = _concurrency_bucket(state, state.config.divergence_mode, batch_size=batch_size)
         try:
             cfg = state.config
             if cfg.latency_profile == "fixed":
@@ -177,6 +202,7 @@ class _Handler(BaseHTTPRequestHandler):
         finally:
             with state.lock:
                 state.inflight -= 1
+                state.lock.notify_all()
 
 
 @dataclass
@@ -194,7 +220,12 @@ def stub_engine(config: StubConfig | None = None) -> Iterator[RunningStub]:
     """Run the stub on an ephemeral port for the duration of the context."""
     state = _State(config or StubConfig())
     handler = type("_Bound", (_Handler,), {"state": state})
-    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    # The stdlib default listen backlog is 5. A barrier test needs every client
+    # connection to actually reach a handler thread, or it deadlocks waiting for
+    # peers that are still queued in the kernel.
+    server = type(
+        "_Server", (ThreadingHTTPServer,), {"request_queue_size": 256, "daemon_threads": True}
+    )(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

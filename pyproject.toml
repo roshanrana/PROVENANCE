@@ -84,6 +84,7 @@ testpaths = ["tests"]
 addopts = "-q --strict-markers"
 markers = [
     "integration: exercises more than one component (still no GPU, no cluster)",
+    "slow: statistical calibration checks — seconds, not milliseconds",
 ]
 
 [tool.coverage.run]

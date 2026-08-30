@@ -12,7 +12,8 @@ GO ?= go
 EPP_DIR := barrier/epp
 
 .PHONY: help bootstrap check check-full check-ship fmt lint typecheck test \
-        go-check attest-demo attest-stage1 attest-stage2 clean
+        go-check attest-demo attest-stage1 attest-stage2 \
+        barrier-up barrier-spike barrier-diff barrier-down clean
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -72,6 +73,21 @@ attest-stage2: ## Stage 2 measured matrix. Needs ENGINE_URL, MODEL, MAX_TOKENS.
 	  { echo "set ENGINE_URL, MODEL and MAX_TOKENS (chosen from stage 1 evidence)"; exit 2; }
 	$(UV) run python -m attest.harness.run --engine-url $(ENGINE_URL) --stage 2 \
 	  --model $(MODEL) --max-tokens $(MAX_TOKENS) --seed $${SEED:-0} --trials $${TRIALS:-128}
+
+# --------------------------------------------------------------------------- barrier
+
+barrier-up: ## Bring up the kind topology. PROFILE=default|hardened
+	chmod +x barrier/deploy/kind/up.sh
+	barrier/deploy/kind/up.sh $${PROFILE:-default}
+
+barrier-spike: ## Run the S-02 spike. Needs the gateway port-forwarded to :8080.
+	$(UV) run python -m barrier.attack.spike_s02 --gateway $${GATEWAY:-http://localhost:8080}
+
+barrier-diff: ## The mitigation, as a diff. This is the deliverable (ADR-004).
+	@diff -u barrier/deploy/values-default.yaml barrier/deploy/values-hardened.yaml || true
+
+barrier-down: ## Delete the kind cluster
+	kind delete cluster --name $${CLUSTER:-provenance}
 
 clean: ## Remove caches and demo artefacts
 	rm -rf .mypy_cache .pytest_cache .ruff_cache .coverage coverage.xml htmlcov

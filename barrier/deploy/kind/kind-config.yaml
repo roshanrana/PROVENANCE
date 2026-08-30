@@ -1,0 +1,27 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: provenance
+
+# Two workers so the simulator pods land on different nodes. Not strictly
+# required — the routing index does not care where a pod runs — but it makes the
+# topology read like something a reviewer would recognise from a real deployment,
+# and it keeps a single node's scheduler from being the reason two "different"
+# pods behave identically.
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+  - role: worker
+  - role: worker
+
+# NFR-09 budgets 48 GB for the whole topology on a 64 GB machine. The simulator
+# is light — no model weights, no GPU — so this fits with room to spare, which is
+# the reason BARRIER's MVP can be GPU-free at all.

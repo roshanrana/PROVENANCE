@@ -1,0 +1,72 @@
+# PROVENANCE — Codex CLI profiles
+#
+# Merge these into ~/.codex/config.toml, then select a profile per invocation:
+#     codex --profile orchestrator
+#     codex --profile worker
+#
+# Codex has no per-agent model/effort frontmatter, so the role split that Claude Code
+# expresses in agent files is expressed here as profiles plus the role prompts in
+# codex/roles/. Same division of labour, different mechanism.
+
+# ---------------------------------------------------------------------------
+# Defaults — conservative. Profiles below override.
+# ---------------------------------------------------------------------------
+model_reasoning_effort = "high"
+approval_policy        = "on-request"
+sandbox_mode           = "workspace-write"
+web_search             = "live"          # needed: upstream re-verification (NFR-19)
+
+project_doc_fallback_filenames = ["AGENTS.md"]
+
+# ---------------------------------------------------------------------------
+# orchestrator — owns the plan. Never implements.
+# Picks tasks, refreshes packs, merges, runs gates, updates STATE.md, reports.
+# ---------------------------------------------------------------------------
+[profiles.orchestrator]
+model_reasoning_effort = "high"
+approval_policy        = "on-request"
+sandbox_mode           = "workspace-write"
+web_search             = "live"
+
+# ---------------------------------------------------------------------------
+# worker — executes exactly one task pack.
+# Medium effort: the pack already contains the thinking. This is execution.
+# ---------------------------------------------------------------------------
+[profiles.worker]
+model_reasoning_effort = "medium"
+approval_policy        = "on-failure"
+sandbox_mode           = "workspace-write"
+web_search             = "disabled"       # a worker needing the web means a pack defect
+
+# ---------------------------------------------------------------------------
+# verifier — judges one diff against its pack's acceptance criteria.
+# read-only sandbox is the point: it structurally cannot "helpfully" fix
+# what it is judging.
+# ---------------------------------------------------------------------------
+[profiles.verifier]
+model_reasoning_effort = "medium"
+approval_policy        = "never"
+sandbox_mode           = "read-only"
+web_search             = "disabled"
+
+# ---------------------------------------------------------------------------
+# verifier-critical — same role, deeper reading, for the ten tasks where a
+# subtle error silently corrupts a published result or a security claim:
+# T-009, T-010, T-011, T-013, T-014, T-015, T-037, T-038, T-039, T-045.
+# ---------------------------------------------------------------------------
+[profiles.verifier-critical]
+model_reasoning_effort = "xhigh"
+approval_policy        = "never"
+sandbox_mode           = "read-only"
+web_search             = "disabled"
+
+# ---------------------------------------------------------------------------
+# spike — time-boxed investigation. Deliverable is a decision, not code.
+# High effort because a spike's output freezes contracts everything else
+# is built against.
+# ---------------------------------------------------------------------------
+[profiles.spike]
+model_reasoning_effort = "high"
+approval_policy        = "on-request"
+sandbox_mode           = "workspace-write"
+web_search             = "live"

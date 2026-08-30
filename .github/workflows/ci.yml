@@ -1,0 +1,75 @@
+name: CI
+
+# CI is a MIRROR of `make check`, never a superset. If it passes locally and
+# fails here, that divergence is the bug — not a reason to add a CI-only step.
+#
+# The demo job runs the actual M0 walking skeleton. A badge that only lints is
+# noise; a badge that runs the pipeline end to end is evidence (NFR-12).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Never let a CI run reach out to the Hub: results must not depend on
+  # network weather, and offline is the path a reviewer without accounts takes.
+  PROVENANCE_HF_OFFLINE: "1"
+
+jobs:
+  check:
+    name: make check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install
+
+      # Pinned in barrier/epp/go.mod. go-check self-skips when go.sum is absent,
+      # so this stays green while T-003 is blocked on the toolchain version.
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: barrier/epp/go.mod
+        continue-on-error: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: make check
+        run: make check
+
+  demo:
+    name: M0 walking skeleton
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: make attest-demo
+        run: make attest-demo

@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: provenance-epp-config
+data:
+  # The scheduling profile. This is the file the whole result turns on: the
+  # default profile has no tenant-salt plugin, the hardened one does.
+  config.yaml: |
+    {{- if .Values.plugins }}
+    plugins:
+    {{- toYaml .Values.plugins | nindent 6 }}
+    {{- end }}
+    schedulingProfiles:
+    {{- toYaml .Values.routing.schedulingProfiles | nindent 6 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: provenance-epp
+  labels: { app: provenance-epp }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: provenance-epp }
+  template:
+    metadata:
+      labels: { app: provenance-epp }
+      annotations:
+        # Roll the pod when the profile changes. Without this a hardened deploy
+        # over a running default cluster would keep serving the old config —
+        # and the run would look hardened while behaving exactly as before.
+        provenance/config-sha: {{ toYaml .Values.routing.schedulingProfiles | sha256sum }}
+    spec:
+      containers:
+        - name: epp
+          image: {{ .Values.epp.image }}
+          args:
+            - --config-file=/etc/epp/config.yaml
+            - --v={{ if eq .Values.epp.logLevel "debug" }}4{{ else }}2{{ end }}
+            {{- with .Values.epp.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.epp.env }}
+          env: {{ toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - containerPort: 9002
+            - containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/epp
+      volumes:
+        - name: config
+          configMap: { name: provenance-epp-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: provenance-epp
+spec:
+  selector: { app: provenance-epp }
+  ports:
+    - name: grpc
+      port: 9002
+    - name: metrics
+      port: 9090

@@ -1,0 +1,13 @@
+apiVersion: v2
+name: provenance-barrier
+description: |
+  Minimal two-tenant llm-d topology for the BARRIER demonstration.
+
+  Deliberately NOT upstream's llm-d chart. This deploys the smallest thing that
+  exhibits the finding — a router with a prefix-cache scorer, two simulator-backed
+  model servers, and two tenants — so a reviewer can read the whole deployment in
+  one sitting. Upstream's chart carries production concerns that would obscure the
+  one mechanism under examination.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

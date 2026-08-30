@@ -1,0 +1,17 @@
+# ko build configuration (HLD §7.6).
+#
+# ko rather than a Dockerfile: NFR-08 budgets 30 minutes from clean clone to first
+# result, and most of that is image build plus cluster bring-up. ko removes most of
+# it, and its reproducible digests serve NFR-02 directly.
+defaultBaseImage: gcr.io/distroless/static:nonroot
+
+builds:
+  - id: provenance-epp
+    main: ./cmd/epp
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s
+      - -w

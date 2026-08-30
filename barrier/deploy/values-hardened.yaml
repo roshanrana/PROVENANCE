@@ -1,0 +1,107 @@
+# HARDENED deployment — the mitigation.
+#
+# Diff this against values-default.yaml. The diff is small on purpose: the claim
+# is that a real multi-tenant gap closes with one plugin and one proxy rule, not
+# that llm-d needs rearchitecting. A large diff would be a weaker result.
+#
+# Three changes, and all three are load-bearing (LLD §4.3).
+
+routing:
+  prefixCacheScorer:
+    enabled: true
+    blockSize: 16
+    maxPrefixBlocks: 256
+
+  schedulingProfiles:
+    - name: default
+      plugins:
+        # CHANGE 1 of 3 — derive the salt from authenticated identity.
+        #
+        # Placed before the producer so the hash chain is seeded with the derived
+        # value. Obligations 1 and 2 of LLD §4.3.
+        - pluginRef: tenant-salt
+        - pluginRef: approx-prefix-cache-producer
+        - pluginRef: prefix-cache-scorer
+          weight: 100
+        - pluginRef: least-queue-filter
+
+plugins:
+  - name: tenant-salt
+    type: tenant-salt
+    parameters:
+      identityHeader: x-llmd-tenant
+
+      # The HMAC key, mounted from a Kubernetes Secret — never in this file, and
+      # never logged. A derived salt in a log is a forgeable credential.
+      saltSecretEnv: PROVENANCE_SALT_SECRET
+
+      # CHANGE 2 of 3 — obligation 3 (ADR-007).
+      #
+      # Rewrites the outbound request body's cache_salt so vLLM's OWN prefix
+      # cache partitions identically. Without this the EPP routing index is
+      # closed while the engine's real KV cache stays shared: the weaker half of
+      # the mitigation, presented as the whole. That is worse than no mitigation,
+      # because it would be published as one.
+      propagateToEngine: true
+
+      # Reject requests with absent or malformed identity rather than routing
+      # them with an empty salt. An empty salt puts the caller straight back into
+      # the shared default namespace — silently, and looking like success.
+      failClosed: true
+
+proxy:
+  # CHANGE 3 of 3 — the trust boundary (ADR-006).
+  #
+  # The proxy authenticates, STRIPS whatever the client sent for these headers,
+  # and injects the identity it vouches for. Without this line the plugin is
+  # reading an attacker-controlled header and the whole mitigation is forgeable
+  # at the edge — so this is not hardening around the fix, it is half of it.
+  #
+  # cache_salt is stripped from the request body for the same reason: a client
+  # that could set it directly could still choose its own namespace.
+  stripInboundHeaders:
+    - x-llmd-tenant
+  stripInboundBodyFields:
+    - cache_salt
+  injectIdentityHeader: x-llmd-tenant
+
+tenants:
+  - name: tenant-a
+    displayName: "Desk A — Equity Research"
+    apiKeySecret: tenant-a-key
+  - name: tenant-b
+    displayName: "Desk B — M&A Advisory"
+    apiKeySecret: tenant-b-key
+
+modelServers:
+  replicas: 2
+  image: ghcr.io/llm-d/llm-d-inference-sim:latest
+  model: Qwen/Qwen2.5-0.5B-Instruct
+  args:
+    - --port=8000
+    - --model=Qwen/Qwen2.5-0.5B-Instruct
+    - --time-to-first-token=200
+    - --inter-token-latency=10
+
+epp:
+  image: provenance-epp:dev
+  # tenant-salt registers as Alpha (it has not been through upstream review), so
+  # the runner needs this to load it. Stating that plainly is more honest than
+  # registering it as Beta to avoid the flag.
+  extraArgs:
+    - --allow-experimental-plugins
+  logLevel: info
+  env:
+    - name: PROVENANCE_SALT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: provenance-salt
+          key: secret
+
+# --- What this does NOT close ------------------------------------------------
+#
+# Under `precise-prefix-cache-producer` the signal also lives in the engine's real
+# KV cache, streamed from vLLM over ZeroMQ. Obligation 3 above partitions that too
+# — the salt reaches vLLM's own block hash (F-03) — but the residual is measured
+# and reported (FR-B-08), not assumed away. Overclaiming here is the failure mode
+# this project most needs to avoid.

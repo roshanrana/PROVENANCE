@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: provenance-sim
+  labels: { app: provenance-sim }
+spec:
+  replicas: {{ .Values.modelServers.replicas }}
+  selector:
+    matchLabels: { app: provenance-sim }
+  template:
+    metadata:
+      labels: { app: provenance-sim }
+    spec:
+      # Spread across nodes so two "different" pods are genuinely different, and
+      # a single node's scheduler is not the reason they behave alike.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: provenance-sim }
+      containers:
+        - name: sim
+          image: {{ .Values.modelServers.image }}
+          args: {{ toYaml .Values.modelServers.args | nindent 12 }}
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 3
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: provenance-sim
+spec:
+  selector: { app: provenance-sim }
+  ports:
+    - port: 8000
+      targetPort: 8000

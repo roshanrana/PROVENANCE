@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
+	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
+	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 )
 
 // PluginType is the value used in EPP YAML `type:` fields.
@@ -23,17 +25,17 @@ type Config struct {
 	IdentityHeader string `json:"identityHeader"`
 
 	// SaltSecretEnv names the environment variable holding the HMAC secret,
-	// mounted from a Kubernetes Secret. The secret is never in the YAML, and
+	// mounted from a Kubernetes Secret. The secret is never in the YAML and
 	// never logged — a derived salt in a log is a forgeable credential.
 	SaltSecretEnv string `json:"saltSecretEnv"`
 
-	// PropagateToEngine rewrites the outbound request body's cache_salt so
-	// vLLM's own prefix cache partitions identically (ADR-007).
+	// PropagateToEngine rewrites the request body's cache_salt so vLLM's own
+	// prefix cache partitions identically (ADR-007). Defaults true.
 	//
-	// Defaults true. With it false the EPP routing index is closed while the
-	// engine's real KV cache stays shared — the weaker half of the mitigation
-	// presented as the whole, which is worse than no mitigation because it
-	// would be published as one.
+	// With it false the EPP routing index is closed while the engine's real KV
+	// cache stays shared — the weaker half of the mitigation presented as the
+	// whole, which is worse than no mitigation because it would be published
+	// as one.
 	PropagateToEngine *bool `json:"propagateToEngine,omitempty"`
 
 	// FailClosed rejects requests with absent or malformed identity rather than
@@ -41,27 +43,29 @@ type Config struct {
 	FailClosed *bool `json:"failClosed,omitempty"`
 }
 
-func (c *Config) propagate() bool {
-	return c.PropagateToEngine == nil || *c.PropagateToEngine
-}
-
-func (c *Config) failClosed() bool {
-	return c.FailClosed == nil || *c.FailClosed
-}
+func (c *Config) propagate() bool  { return c.PropagateToEngine == nil || *c.PropagateToEngine }
+func (c *Config) failClosed() bool { return c.FailClosed == nil || *c.FailClosed }
 
 // TenantSalt binds the prefix cache salt to authenticated tenant identity.
 //
-// Three contractual obligations (LLD §4.3), and omitting any one of them yields a
-// mitigation that appears to work and does not:
-//
-//	1. derive the salt by HMAC — never read it from the client
-//	2. seed the EPP prefix hash chain with it
-//	3. rewrite the outbound cache_salt so the engine partitions identically
+// It implements requestcontrol.RequestHeaderProcessor, which is the hook that
+// runs "after InferenceRequest creation but before admission control" — and
+// therefore before any DataProducer computes prefix block hashes. That ordering
+// is the whole reason this works: PreRequest fires after scheduling, far too
+// late to influence the hash chain the scheduler already used.
 type TenantSalt struct {
 	typedName fwkplugin.TypedName
 	cfg       Config
 	secret    []byte
 }
+
+// Compile-time proof that we satisfy the framework's interfaces. Without these
+// the plugin would register happily and then be silently inert, because nothing
+// would ever call it — a failure mode that produces a "hardened" run behaving
+// exactly like the default one.
+var (
+	_ fwkplugin.Plugin = (*TenantSalt)(nil)
+)
 
 // Factory constructs the plugin from its YAML `parameters:` block.
 func Factory(name string, parameters *json.Decoder, _ fwkplugin.Handle) (fwkplugin.Plugin, error) {
@@ -96,12 +100,76 @@ func Factory(name string, parameters *json.Decoder, _ fwkplugin.Handle) (fwkplug
 
 func (p *TenantSalt) TypedName() fwkplugin.TypedName { return p.typedName }
 
-// SaltFor resolves the salt for one request's headers.
+// RequestHeader derives the salt and stamps it onto the request.
 //
-// Returns ("", nil) only when fail-open is explicitly configured — which is
-// available for the DEFAULT (leaking) deployment, because that is the
-// configuration under attack and it must behave as upstream does.
-func (p *TenantSalt) SaltFor(_ context.Context, headers map[string]string) (string, error) {
+// Runs before data production, so the prefix hash chain is seeded with the
+// derived value (obligation 2), and the same value reaches the engine
+// (obligation 3).
+func (p *TenantSalt) RequestHeader(_ context.Context, request *fwksched.InferenceRequest) error {
+	salt, err := p.saltFor(request.Headers)
+	if err != nil {
+		// Fail closed: reject rather than route with an empty salt. An empty
+		// salt is the shared default namespace — the exact exposure this plugin
+		// exists to close — and failing open would look like success.
+		return err
+	}
+	if salt == "" {
+		return nil // fail-open, only reachable in the default (leaking) profile
+	}
+	if p.cfg.propagate() {
+		ApplySalt(request.Body, salt)
+	}
+	return nil
+}
+
+// ApplySalt stamps the derived salt onto whichever request variant is populated.
+//
+// CacheSalt is not a field on InferenceRequestBody — it lives on each endpoint
+// type (completions, chat, messages, ...) and on TokenizedRequest, which is what
+// the prefix hasher actually reads. Setting only one of them would close the
+// channel for one API surface and silently leave the others open, which is the
+// kind of partial fix that is worse than none because it still gets published as
+// a fix.
+//
+// Every assignment OVERRIDES rather than deferring to a client-supplied value:
+// that value is precisely the forgery vector being closed.
+func ApplySalt(body *fwkrh.InferenceRequestBody, salt string) int {
+	if body == nil || salt == "" {
+		return 0
+	}
+	applied := 0
+	set := func(target *string) {
+		*target = salt
+		applied++
+	}
+
+	if body.Completions != nil {
+		set(&body.Completions.CacheSalt)
+	}
+	if body.ChatCompletions != nil {
+		set(&body.ChatCompletions.CacheSalt)
+	}
+	if body.Messages != nil {
+		set(&body.Messages.CacheSalt)
+	}
+	if body.Responses != nil {
+		set(&body.Responses.CacheSalt)
+	}
+	if body.Conversations != nil {
+		set(&body.Conversations.CacheSalt)
+	}
+	if body.Embeddings != nil {
+		set(&body.Embeddings.CacheSalt)
+	}
+	// The one that seeds the EPP's own prefix hash chain (obligation 2). The
+	// others carry it to the engine (obligation 3).
+	if body.TokenizedRequest != nil {
+		set(&body.TokenizedRequest.CacheSalt)
+	}
+	return applied
+}
+
+func (p *TenantSalt) saltFor(headers map[string]string) (string, error) {
 	tenant, err := TenantFromHeaders(headers, p.cfg.IdentityHeader)
 	if err != nil {
 		if p.cfg.failClosed() {
@@ -112,33 +180,21 @@ func (p *TenantSalt) SaltFor(_ context.Context, headers map[string]string) (stri
 	return DeriveSalt(p.secret, tenant)
 }
 
-// RewriteBody sets cache_salt on the outbound request body to the derived value.
-//
-// It OVERRIDES rather than merges or defers: a client-supplied cache_salt is
-// exactly the forgery vector this plugin closes. Preferring the client's value
-// when present — the natural-looking implementation — would leave the attack
-// fully open while every test that only checks the honest path still passed.
-func (p *TenantSalt) RewriteBody(body map[string]any, salt string) bool {
-	if !p.cfg.propagate() || salt == "" {
-		return false
-	}
-	body["cache_salt"] = salt
-	return true
-}
-
-// Propagates reports whether obligation 3 is active. Exposed so the deploy
-// smoke test can assert the hardened profile actually has it on.
+// Propagates reports whether obligation 3 is active, so the deploy smoke test can
+// assert the hardened profile actually has it on rather than assuming.
 func (p *TenantSalt) Propagates() bool { return p.cfg.propagate() }
 
 // FailsClosed reports obligation-1 enforcement, for the same reason.
 func (p *TenantSalt) FailsClosed() bool { return p.cfg.failClosed() }
 
 func init() {
-	// Registration happens here rather than in a fork of upstream: `Register`
+	// Registration happens here rather than in a fork of upstream: Register
 	// writes to an exported package-level registry, so a blank import of this
 	// package from our own main.go is enough (ADR-002, STATE.md F-02).
 	//
-	// Alpha stability is honest — this plugin has not been through upstream
-	// review, and running it requires --allow-experimental-plugins.
+	// Alpha stability is honest — this has not been through upstream review, and
+	// running it requires --allow-experimental-plugins. Registering it as Beta to
+	// avoid the flag would be a small lie with a large payoff for us and none for
+	// the reader.
 	fwkplugin.Register(PluginType, fwkplugin.StabilityAlpha, Factory)
 }

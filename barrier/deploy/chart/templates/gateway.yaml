@@ -1,0 +1,90 @@
+{{/*
+  The proxy — and therefore the trust boundary (docs/threat-model.md §3).
+
+  stripInboundHeaders is the load-bearing line in the hardened profile. Without
+  it the identity header is attacker-controlled and the mitigation is forgeable
+  at the edge, so it is rendered here explicitly rather than assumed.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: provenance-gateway-config
+data:
+  envoy.yaml: |
+    static_resources:
+      listeners:
+        - address:
+            socket_address: { address: 0.0.0.0, port_value: 8080 }
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: provenance
+                    route_config:
+                      virtual_hosts:
+                        - name: all
+                          domains: ["*"]
+                          routes:
+                            - match: { prefix: "/" }
+                              route:
+                                cluster: sim
+                                {{- with .Values.proxy.stripInboundHeaders }}
+                                request_headers_to_remove:
+                                {{- range . }}
+                                  - {{ . }}
+                                {{- end }}
+                                {{- end }}
+                    http_filters:
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+      clusters:
+        - name: sim
+          type: STRICT_DNS
+          load_assignment:
+            cluster_name: sim
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: { address: provenance-sim, port_value: 8000 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: provenance-gateway
+  labels: { app: provenance-gateway }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: provenance-gateway }
+  template:
+    metadata:
+      labels: { app: provenance-gateway }
+      annotations:
+        provenance/proxy-sha: {{ toYaml .Values.proxy | sha256sum }}
+    spec:
+      containers:
+        - name: envoy
+          image: envoyproxy/envoy:v1.31-latest
+          args: ["-c", "/etc/envoy/envoy.yaml"]
+          ports: [{ containerPort: 8080 }]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/envoy
+      volumes:
+        - name: config
+          configMap: { name: provenance-gateway-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: provenance-gateway
+spec:
+  type: NodePort
+  selector: { app: provenance-gateway }
+  ports:
+    - port: 80
+      targetPort: 8080
+      nodePort: 30080

@@ -12,3 +12,8 @@ htmlcov/
 !tests/fixtures/testkey.ed25519
 .env
 bench/results/**/tenant-keys/
+
+# Transfer artefacts from the Cowork session — never part of the repo.
+_incoming.tgz
+_m*.tgz
+_to_delete/

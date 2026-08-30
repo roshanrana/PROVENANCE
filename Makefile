@@ -12,7 +12,7 @@ GO ?= go
 EPP_DIR := barrier/epp
 
 .PHONY: help bootstrap check check-full check-ship fmt lint typecheck test \
-        go-check attest-demo clean
+        go-check attest-demo attest-stage1 attest-stage2 clean
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -61,6 +61,17 @@ check-ship: check-full ## check-full + dependency, secrets and vulnerability sca
 
 attest-demo: ## M0 walking skeleton — full pipeline, stub engine, no GPU
 	$(UV) run python scripts/attest_demo.py
+
+attest-stage1: ## Stage 1 divergence hunt. Needs ENGINE_URL (a real vLLM on a GPU).
+	@test -n "$(ENGINE_URL)" || { echo "set ENGINE_URL=http://host:8000"; exit 2; }
+	$(UV) run python -m attest.harness.run --engine-url $(ENGINE_URL) --stage 1 \
+	  --seed $${SEED:-0} --trials $${TRIALS:-32}
+
+attest-stage2: ## Stage 2 measured matrix. Needs ENGINE_URL, MODEL, MAX_TOKENS.
+	@test -n "$(ENGINE_URL)" -a -n "$(MODEL)" -a -n "$(MAX_TOKENS)" || \
+	  { echo "set ENGINE_URL, MODEL and MAX_TOKENS (chosen from stage 1 evidence)"; exit 2; }
+	$(UV) run python -m attest.harness.run --engine-url $(ENGINE_URL) --stage 2 \
+	  --model $(MODEL) --max-tokens $(MAX_TOKENS) --seed $${SEED:-0} --trials $${TRIALS:-128}
 
 clean: ## Remove caches and demo artefacts
 	rm -rf .mypy_cache .pytest_cache .ruff_cache .coverage coverage.xml htmlcov

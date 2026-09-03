@@ -8,7 +8,7 @@
 
 ## 1. What this is and why it exists
 
-I am building a public portfolio project that demonstrates deep, operational expertise with **vLLM** and **llm-d** (the CNCF-sandbox, Kubernetes-native distributed inference stack built on vLLM, Kubernetes, and the Gateway API Inference Extension). My background is enterprise financial services — backend systems, data pipelines, regulatory-driven implementation work (FINRA 4210, T+1, ISO 20022) — and I am targeting Forward Deployed Engineer roles at fintech and AI-infrastructure companies.
+I am building a public portfolio project that demonstrates deep, operational expertise with **vLLM** and **llm-d** (the CNCF-sandbox, Kubernetes-native distributed inference stack built on vLLM, Kubernetes, and the Gateway API Inference Extension). My background is enterprise financial services — backend systems, data pipelines, regulatory-driven implementation work (FINRA 4210, T+1, ISO 20022) — and the project is positioned for customer-facing implementation work at fintech and AI-infrastructure companies.
 
 The project should read as *field engineering*, not as a tutorial. The premise is:
 
@@ -89,7 +89,7 @@ This ecosystem is moving fast and my knowledge of it is not current. Before comm
 
 **BARRIER is done when** a reviewer can run one command and see: an attacker process correctly classifying whether a target prefix was recently queried by a different tenant, at an accuracy meaningfully above chance, with the statistical test shown rather than asserted; then the same attack run against the hardened configuration falling to chance; alongside an honest table of what the isolation cost in cache hit rate and p50/p99 TTFT.
 
-**The project is done when** the README makes a hiring manager at a fintech think *this person has actually operated this stack in an environment with auditors in it.*
+**The project is done when** the README makes a senior technical reviewer at a fintech think *this person has actually operated this stack in an environment with auditors in it.*
 
 ---
 

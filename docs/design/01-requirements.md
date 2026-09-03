@@ -29,7 +29,7 @@ Resolved since v0.1: **A-03** (confirmed — index is model-scoped only), **S-03
 ## 1. Purpose
 
 PROVENANCE is a public portfolio repository demonstrating operational expertise with vLLM
-and llm-d, aimed at Forward Deployed Engineer roles in fintech and AI infrastructure. It
+and llm-d, positioned for customer-facing implementation work in fintech and AI infrastructure. It
 must read as field engineering conducted in an environment with auditors in it — not as a
 tutorial.
 
@@ -39,7 +39,7 @@ information-barrier-safe.**
 - **ATTEST** — inference reproducibility as a model-risk-management control.
 - **BARRIER** — KV-cache prefix locality as a cross-tenant information leak, and its mitigation.
 
-The primary reader is a hiring manager or senior engineer who will skim the README for
+The primary reader is a senior technical reviewer who will skim the README for
 ninety seconds, then either close the tab or read one writeup end to end. Every requirement
 below is in service of that second outcome.
 
@@ -74,7 +74,7 @@ These are settled. Reopening any of them is a plan change requiring an entry in
 
 ### 3.1 Project level
 
-The project is done when the README makes a hiring manager at a fintech think *this person
+The project is done when the README makes a senior technical reviewer at a fintech think *this person
 has actually operated this stack in an environment with auditors in it.*
 
 Operationally, three testable properties:

@@ -34,11 +34,11 @@ raw output plus the exact command and git SHA that produced it. There are no
 placeholder numbers here, and there never will be — an unbacked figure would
 undermine the one thing the project is actually claiming.
 
-## Interview Snapshot
+## Project Snapshot
 
 | | |
 |---|---|
-| Role signal | Forward deployed AI infrastructure for regulated institutions: translate model-risk and information-barrier concerns into reproducible controls. |
+| Delivery signal | Customer-facing AI infrastructure for regulated institutions: translate model-risk and information-barrier concerns into reproducible controls. |
 | Product features | ATTEST signed inference receipts, model identity binding to Hugging Face commits and weight digests, resumable measurement harness, pre-registered statistical decision rules, BARRIER tenant-salt threat model, llm-d EPP plugin, default-vs-hardened deployment diff. |
 | Implementation stack | Python 3.12, uv, pytest, ruff, mypy, NumPy/SciPy, cryptography/ed25519, Go, vLLM, llm-d, Kubernetes/kind, Helm-style manifests. |
 | Validation performed | `make check`, 200+ tests, coverage gates, `make attest-demo`, receipt tamper tests, bootstrap/permutation/AUC tests, Go salt-derivation tests, CI mirror of local gates. Hardware-dependent vLLM measurements and kind cluster verification are documented as explicit next gates. |

@@ -108,7 +108,7 @@ Packs for those tasks produce **self-contained scripts that record their own out
 
 ## The standard this project is held to
 
-The README must make a hiring manager at a fintech think: *this person has actually operated
+The README must make a senior technical reviewer at a fintech think: *this person has actually operated
 this stack in an environment with auditors in it.*
 
 That reduces to three testable properties. Every headline number traces to committed raw

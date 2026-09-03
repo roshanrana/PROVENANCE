@@ -8,7 +8,7 @@
 ## 1. Overview
 
 PROVENANCE is not a service. It is a pair of **reproducible experiment rigs** plus one
-**shipped mitigation**, packaged so a reviewer can run them and a hiring manager can read
+**shipped mitigation**, packaged so a reviewer can run them and a senior technical reviewer can read
 them. That framing drives every architectural choice below: there is no server to keep up,
 no database to migrate, and no user to authenticate. What there is instead is a hard
 requirement that every number be traceable to committed evidence (NFR-01) and that a

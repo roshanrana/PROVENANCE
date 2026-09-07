@@ -27,7 +27,7 @@
 |---|---|
 | Tests | **272 Python + 20 Go passing** |
 | Gate | `make check` — format, lint, strict types, tests, Go build/vet/test |
-| Measured results | **Divergence observed, and batch invariance eliminates it** — H100, `bench/results/stage2-h100-2026-09-07.md`. No cost-of-determinism number yet. |
+| Measured results | **Determinism costs 22.7% of throughput** (95% CI [0.741, 0.808]) and cuts divergence ~85% without eliminating it — H100, `bench/results/cost-h100-2026-09-07.md`. |
 
 Every headline number this README will eventually carry must trace to committed
 raw output plus the exact command and git SHA that produced it. There are no
@@ -68,24 +68,28 @@ SR 11-7 and its international analogues assume a model's output can be reproduce
 and validated. Almost nobody has connected these two facts.
 
 **Measured, 2026-09-07, on an H100 (compute capability 9.0).** Same prompt,
-temperature 0, fixed seed, concurrency 16, 32 trials per arm:
+temperature 0, fixed seed, concurrency 16, 128 max tokens, 128 trials per arm:
 
-| `VLLM_BATCH_INVARIANT` | distinct logprob vectors |
-|---|---|
-| `0` (default) | **6** |
-| `1` | **1** |
+| `VLLM_BATCH_INVARIANT` | distinct logprob vectors | output throughput |
+|---|---|---|
+| `0` (default) | **34** of 128 | 1.00× |
+| `1` | **5** of 128 | **0.773×**, 95% CI [0.741, 0.808] |
 
-The default deployment posture cannot reproduce its own output. The documented
-flag fixes it. Both arms ran on the same card in the same session — vLLM reads
-that variable at import time, so the run is two engine processes over one
-run-id, and the driver refuses any cell whose configuration the live engine does
-not have. `bench/results/stage2-h100-2026-09-07.md` has the full conditions,
-including an earlier run of the same matrix that was **wrong**, why, and how it
-was caught.
+Two findings, and the second is the one that took a second run to see.
 
-**No cost-of-determinism number yet** — the harness records no per-request
-latency, and both arms finished in about a second at this size. That is the next
-gap, not a published figure.
+**Determinism costs about a quarter of your throughput** — 22.7%, with a
+confidence interval that excludes 1.0 — plus roughly 30% on median latency. This
+figure does not appear to be published anywhere.
+
+**Batch invariance is a large mitigation, not a guarantee.** It cuts divergence
+by ~85% at this configuration and does not eliminate it. An earlier run at 32
+trials showed 6 → 1 and concluded it was fixed; that run was underpowered, and
+the writeup is amended rather than deleted. Both are in `bench/results/`, along
+with a third run that was simply **wrong** — and why, and how it was caught.
+
+Still unmeasured: any dependence on model size, batch shape or sequence length;
+why the 5 residual vectors remain; and the caching × determinism interaction,
+which needs the SGLang arm (ADR-009).
 
 **What ATTEST does:** demonstrates the divergence under adversarial batch
 composition, proves bitwise reproducibility once invariance is on, **quantifies

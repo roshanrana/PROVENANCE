@@ -104,7 +104,7 @@
   },
 
   "totals": {
-    "python_tests": 318,
+    "python_tests": 332,
     "go_tests": 22,
     "adrs": 12,
     "findings": 27,

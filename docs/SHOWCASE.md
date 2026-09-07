@@ -6,7 +6,7 @@ A guided tour of what the repository does, with the commands that show it. Nothi
 
 ```bash
 uv sync
-make check          # 318 Python tests and 22 Go tests, about 40 seconds
+make check          # 332 Python tests and 22 Go tests, about 40 seconds
 make attest-demo    # one inference through the entire ATTEST pipeline
 make barrier-diff   # the mitigation, as a diff
 ```

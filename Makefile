@@ -13,7 +13,7 @@ EPP_DIR := barrier/epp
 
 .PHONY: help bootstrap check check-full check-ship fmt lint typecheck test \
         go-check attest-demo attest-stage1 attest-stage2 \
-        barrier-up barrier-spike barrier-diff barrier-down clean
+        barrier-up barrier-spike barrier-diff barrier-down headline clean
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -73,6 +73,11 @@ attest-stage2: ## Stage 2 measured matrix. Needs ENGINE_URL, MODEL, MAX_TOKENS.
 	  { echo "set ENGINE_URL, MODEL and MAX_TOKENS (chosen from stage 1 evidence)"; exit 2; }
 	$(UV) run python -m attest.harness.run --engine-url $(ENGINE_URL) --stage 2 \
 	  --model $(MODEL) --max-tokens $(MAX_TOKENS) --seed $${SEED:-0} --trials $${TRIALS:-128}
+
+# --------------------------------------------------------------------------- metrics
+
+headline: ## Write metrics/headline.json: observed numbers only; offline, seeded, no GPU
+	$(UV) run python -m metrics.headline
 
 # --------------------------------------------------------------------------- barrier
 

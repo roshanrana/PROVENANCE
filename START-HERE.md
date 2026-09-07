@@ -3,7 +3,7 @@
 **PROVENANCE** — verifiable and tenant-isolated LLM inference for regulated environments.
 
 This repository is **shipped**. Both workstreams have their headline result measured,
-`make check` is green at **318 Python and 22 Go tests**, and no number is published here
+`make check` is green at **332 Python and 22 Go tests**, and no number is published here
 that does not trace to raw output committed under `bench/results/`.
 
 Four places to start, in this order: `README.md` for the claims, `docs/SHIP-REPORT.md` for

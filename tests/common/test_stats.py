@@ -11,6 +11,7 @@ import pytest
 from scipy.stats import mannwhitneyu
 
 from common.stats.auc import InsufficientData, auc, auc_bootstrap_ci
+from common.stats.calibration import bootstrap_coverage
 from common.stats.decision import (
     AUC_SUCCESS_THRESHOLD,
     CHANCE,
@@ -157,13 +158,10 @@ def test_bootstrap_interval_is_calibrated() -> None:
     coverage on one fixed seed and failed, because a 95% interval is *supposed* to
     miss one time in twenty. Coverage is the property; a single draw is an anecdote.
     """
-    trials, hits = 200, 0
-    for i in range(trials):
-        labels, scores = _separated(50, 0.0, 1000 + i)
-        _, lo, hi = auc_bootstrap_ci(labels, scores, n_resamples=200, rng_seed=i)
-        hits += lo <= CHANCE <= hi
+    result = bootstrap_coverage(trials=200, n_per_class=50, n_resamples=200, seed_base=1000)
+    assert result.trials == 200 and result.nominal == CONFIDENCE
 
-    coverage = hits / trials
+    coverage = result.coverage
     # Generous band: 200 trials of a nominal-95% procedure has a standard error of
     # about 1.5pp, and the percentile bootstrap is only asymptotically exact.
     assert 0.88 <= coverage <= 0.99, f"coverage {coverage:.3f} is not near nominal 95%"

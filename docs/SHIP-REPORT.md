@@ -70,7 +70,7 @@ check ended up as tested code rather than a shell one-liner.
 ## 3. Gates
 
 ```
-make check   ruff · ruff format · mypy strict · 318 pytest · Go build/vet/test (22)
+make check   ruff · ruff format · mypy strict · 332 pytest · Go build/vet/test (22)
 ```
 
 Green. The Go gate fails in the cloud container only, because it invokes the

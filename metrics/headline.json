@@ -1,0 +1,95 @@
+{
+  "kpis": {
+    "bootstrap_coverage": {
+      "label": "Bootstrap CI coverage",
+      "value": "91.0%",
+      "note": "200 null datasets, nominal 95%; n=100, 200 resamples, seeds 1000+",
+      "accent": "teal"
+    },
+    "components": {
+      "label": "Components",
+      "value": "8",
+      "note": "declared in docs/design/02-hld.md §4; every path present on the tree",
+      "accent": "blue"
+    }
+  },
+  "bars": {
+    "title": "Observed offline",
+    "rows": [
+      {
+        "label": "Null datasets whose 95% CI contained 0.5",
+        "value": 182,
+        "max": 200,
+        "display": "182/200",
+        "accent": "teal"
+      },
+      {
+        "label": "Claims verifiable with no GPU",
+        "value": 4,
+        "max": 11,
+        "display": "4/11",
+        "accent": "blue"
+      }
+    ]
+  },
+  "facts": {
+    "title": "What has been demonstrated, and what has not",
+    "rows": [
+      {
+        "label": "Receipt pipeline, end to end, including tamper detection",
+        "value": "`make attest-demo` runs matrix → ledger → engine → raw JSONL → canonical receipt → signature → verification → manifest, then tampers with the receipt and requires exit code 3",
+        "status": "ok"
+      },
+      {
+        "label": "Statistical decision rules and their calibration",
+        "value": "`common/stats/` tests, including the 200-dataset bootstrap calibration",
+        "status": "ok"
+      },
+      {
+        "label": "Tenant-salt derivation and plugin registration",
+        "value": "Go tests in `barrier/epp/`",
+        "status": "ok"
+      },
+      {
+        "label": "Default-vs-hardened deployment diff",
+        "value": "`make barrier-diff`",
+        "status": "ok"
+      },
+      {
+        "label": "Batch-composition divergence",
+        "value": "34 of 128 distinct logprob vectors at temperature 0; 5 of 128 remain under vLLM's batch-invariant mode, 1 of 128 under SGLang's deterministic mode [pending: needs a GPU or the CI kind cluster; recorded in bench/results, not re-observed by this offline harness]",
+        "status": "pending"
+      },
+      {
+        "label": "Cost of determinism",
+        "value": "18.0% of throughput on SGLang, isolated from prefix caching (D/B ratio 0.820); 22.7% on vLLM, confounded with cache loss, 95% CI [0.741, 0.808] [pending: needs a GPU or the CI kind cluster; recorded in bench/results, not re-observed by this offline harness]",
+        "status": "pending"
+      },
+      {
+        "label": "Two-tenant cluster topology, both profiles",
+        "value": "GitHub Actions CI brings up the simulator-backed llm-d deployment in `default` and `hardened` and runs S-02 and FR-B-03 against it, for £0 [pending: needs Docker + kind; runs in the BARRIER CI workflow]",
+        "status": "pending"
+      },
+      {
+        "label": "The routing index leaks across tenants, and the tenant salt closes it",
+        "value": "ADR-012, CI run #15, 40 trials per profile, n=80 per verdict: `default` probe match ratio 1.0000 vs control 0.0000, AUC 1.0000 [1.0000, 1.0000], p=9.999e-05; `hardened` probe 0.0000, AUC 0.5000, at chance [pending: needs a GPU or the CI kind cluster; recorded in bench/results, not re-observed by this offline harness]",
+        "status": "pending"
+      },
+      {
+        "label": "A client-observable routing oracle on the simulator",
+        "value": "ADR-011, CI run #12, n=402: latency AUC 0.5581 [0.5026, 0.6138], p=0.0425, clearing no pre-registered threshold [pending: needs a GPU or the CI kind cluster; recorded in bench/results, not re-observed by this offline harness]",
+        "status": "pending"
+      },
+      {
+        "label": "A client-observable timing oracle on real vLLM",
+        "value": "FR-B-09. The simulator does not vary time-to-first-token on cache hits, so it cannot answer the question [pending: FR-B-09 is open: needs real vLLM on a GPU]",
+        "status": "pending"
+      },
+      {
+        "label": "Recovery of unknown victim content",
+        "value": "The measured attack is a confirmation oracle: the probe sends the victim's prompt verbatim, so the perfect match is by construction. It shows a guessed prefix being confirmed, nothing more [blocked: not claimed by design]",
+        "status": "blocked"
+      }
+    ]
+  }
+}

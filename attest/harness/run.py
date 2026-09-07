@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -83,7 +84,16 @@ def _run_one_trial(
 ) -> dict[str, Any]:
     from attest.harness.engine import logprobs_digest
 
+    # Wall clock per request, measured with a monotonic clock so an NTP step
+    # mid-session cannot produce a negative "latency". attest.analysis.cost has
+    # always been able to turn these into a cost-of-determinism figure with
+    # bootstrap confidence intervals; until now nothing recorded them, so the
+    # analysis had no input and the number could not be published.
+    started = time.perf_counter()
     completion = engine.complete(_prompt_for(cell, trial), sampling, model=cell.params.model)
+    latency_s = time.perf_counter() - started
+
+    output_tokens = len(completion.token_ids)
     return {
         "cell_id": cell.cell_id,
         "trial": trial,
@@ -91,6 +101,12 @@ def _run_one_trial(
         "text": completion.text,
         "logprobs": completion.logprobs,
         "logprobs_sha256": logprobs_digest(completion.logprobs),
+        "latency_s": latency_s,
+        "output_tokens": output_tokens,
+        # Per-request throughput. Guarded because a zero-duration measurement is
+        # a clock artefact, not an infinitely fast engine, and letting an `inf`
+        # into the bootstrap would poison every interval computed from it.
+        "tokens_per_s": (output_tokens / latency_s) if latency_s > 0 else 0.0,
         "ts_utc": iso(utc_now()),
     }
 

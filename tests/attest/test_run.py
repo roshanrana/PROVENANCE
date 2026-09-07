@@ -380,3 +380,45 @@ def test_an_unreachable_engine_does_not_silently_pass_the_guard() -> None:
     reason = _engine_disagrees_with("http://127.0.0.1:1", cell)
     assert reason is not None
     assert "could not read" in reason
+
+
+def test_the_guard_reads_sglangs_endpoint_too() -> None:
+    """ADR-009's engine-neutral determinism, made executable.
+
+    The cell says batch_invariant. vLLM says VLLM_BATCH_INVARIANT nested under
+    vllm_env at /server_info; SGLang says enable_deterministic_inference at
+    /get_server_info. Something has to translate, and if it does not, the guard
+    fails closed and an SGLang run skips every cell it was asked to measure.
+    """
+    import httpx
+
+    from attest.harness.matrix import Cell, CellParams
+    from attest.harness.run import _engine_determinism, _engine_disagrees_with
+
+    def _cell(batch_invariant: bool) -> Cell:
+        return Cell(
+            cell_id="c0000",
+            params=CellParams(
+                model="m",
+                max_tokens=8,
+                concurrency=1,
+                batch_invariant=batch_invariant,
+                length_heterogeneity="uniform",
+                arrival="burst",
+                trials=1,
+                seed=0,
+            ),
+        )
+
+    def sglang(request: httpx.Request) -> httpx.Response:
+        # Only SGLang's endpoint answers; vLLM's 404s, as it would in reality.
+        if request.url.path == "/get_server_info":
+            return httpx.Response(200, json={"enable_deterministic_inference": True})
+        return httpx.Response(404)
+
+    with httpx.Client(transport=httpx.MockTransport(sglang)) as client:
+        assert _engine_determinism("http://sglang", client=client) is True
+        assert _engine_disagrees_with("http://sglang", _cell(True), client=client) is None
+        reason = _engine_disagrees_with("http://sglang", _cell(False), client=client)
+        assert reason is not None
+        assert "Refusing to measure" in reason

@@ -54,6 +54,8 @@ ignore = ["N818"]
 "barrier/**" = ["TID251"]
 "tests/**" = ["TID251"]
 "scripts/**" = ["TID251", "E402"]
+# gpu/ is a consumer of the harness, not part of common/. Same reasoning.
+"gpu/**" = ["TID251"]
 
 # ---------------------------------------------------------------------------
 # mypy — strict where a silent type error would corrupt a published number.

@@ -138,33 +138,58 @@ def run_cell(engine_url: str, cell: Cell, run_dir: Path) -> list[dict[str, Any]]
     return records
 
 
-def _engine_determinism(engine_url: str) -> bool | None:
-    """What the LIVE engine reports about its own invariance, or None.
+def _engine_determinism(engine_url: str, *, client: httpx.Client | None = None) -> bool | None:
+    """What the LIVE engine reports about its own determinism, or None.
 
-    Two endpoints, because there are two kinds of engine and asking only one is
-    how the first version of this guard failed. ``EngineClient.resolved_state``
-    reads ``/_stub/resolved_config``, which exists **only on the test stub**.
-    Against a real vLLM it 404s, the guard caught the EngineError, returned
-    "could not compare", and every cell ran regardless — so the guard written to
-    stop a mislabelled comparison silently permitted one, on real hardware,
-    which is exactly the failure it names.
+    Three endpoints, in order, because there are three kinds of engine and
+    asking only one is how the first version of this guard failed.
+    ``EngineClient.resolved_state`` reads ``/_stub/resolved_config``, which
+    exists **only on the test stub**. Against a real vLLM it 404s, the guard
+    caught the EngineError, returned "could not compare", and every cell ran
+    regardless — so the guard written to stop a mislabelled comparison silently
+    permitted one, on rented hardware, the first time it met a real engine.
 
-    Real engines are therefore asked first, by the path that actually exists.
+    The two engines expose different paths and different shapes, so both are
+    tried by name rather than hoping one generalises:
+
+    * vLLM      ``/server_info?config_format=json``  → ``vllm_env.VLLM_BATCH_INVARIANT``
+    * SGLang    ``/get_server_info``                 → ``enable_deterministic_inference``
+
+    This is where ADR-009's "engine-neutral determinism" stops being a naming
+    decision and starts being executable: the cell says ``batch_invariant``, the
+    engines say two different things, and something has to translate.
     """
+    from attest.harness.sglang import _observed as _observed_sglang
     from attest.harness.vllm import _observed_batch_invariance
 
+    owns_client = client is None
+    http = client or httpx.Client(timeout=30.0)
+
+    def _json(path: str, params: dict[str, str] | None = None) -> Any | None:
+        try:
+            response = http.get(f"{engine_url.rstrip('/')}{path}", params=params)
+            response.raise_for_status()
+            return response.json()
+        except (httpx.HTTPError, ValueError):
+            return None
+
     try:
-        response = httpx.get(
-            f"{engine_url.rstrip('/')}/server_info",
-            params={"config_format": "json"},
-            timeout=30.0,
-        )
-        response.raise_for_status()
-        observed = _observed_batch_invariance(response.json())
-        if observed is not None:
-            return observed
-    except (httpx.HTTPError, ValueError):
-        pass
+        payload = _json("/server_info", {"config_format": "json"})
+        if payload is not None:
+            observed = _observed_batch_invariance(payload)
+            if observed is not None:
+                return observed
+
+        payload = _json("/get_server_info")
+        if payload is not None:
+            observed = _observed_sglang(
+                payload, ("enable_deterministic_inference", "deterministic")
+            )
+            if observed is not None:
+                return observed
+    finally:
+        if owns_client:
+            http.close()
 
     try:
         with EngineClient(engine_url) as engine:
@@ -173,7 +198,9 @@ def _engine_determinism(engine_url: str) -> bool | None:
         return None
 
 
-def _engine_disagrees_with(engine_url: str, cell: Cell) -> str | None:
+def _engine_disagrees_with(
+    engine_url: str, cell: Cell, *, client: httpx.Client | None = None
+) -> str | None:
     """Does the live engine contradict what this cell claims to be measuring?
 
     **Fails closed.** If the engine's invariance state cannot be read at all,
@@ -183,7 +210,7 @@ def _engine_disagrees_with(engine_url: str, cell: Cell) -> str | None:
     was an artifact. A result whose label cannot be verified is not a cheaper
     result; it is a wrong one that costs the same.
     """
-    observed = _engine_determinism(engine_url)
+    observed = _engine_determinism(engine_url, client=client)
     if observed is None:
         return (
             "could not read the engine's invariance state from /server_info or "

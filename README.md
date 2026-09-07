@@ -27,7 +27,7 @@
 |---|---|
 | Tests | **272 Python + 20 Go passing** |
 | Gate | `make check` — format, lint, strict types, tests, Go build/vet/test |
-| Measured results | **Determinism costs 22.7% of throughput** (95% CI [0.741, 0.808]) and cuts divergence ~85% without eliminating it — H100, `bench/results/cost-h100-2026-09-07.md`. |
+| Measured results | **Determinism costs 18.0% of throughput** on SGLang, isolated from prefix caching; 22.7% on vLLM, confounded with it. Five runs in `bench/results/`, including the ones that were wrong. |
 
 Every headline number this README will eventually carry must trace to committed
 raw output plus the exact command and git SHA that produced it. There are no
@@ -87,9 +87,28 @@ trials showed 6 → 1 and concluded it was fixed; that run was underpowered, and
 the writeup is amended rather than deleted. Both are in `bench/results/`, along
 with a third run that was simply **wrong** — and why, and how it was caught.
 
-Still unmeasured: any dependence on model size, batch shape or sequence length;
-why the 5 residual vectors remain; and the caching × determinism interaction,
-which needs the SGLang arm (ADR-009).
+**The decomposition (A-03), also on the H100.** SGLang runs deterministically
+*with* its radix cache on, which vLLM cannot — so the cost of determinism can be
+separated from the cost of losing the cache:
+
+| ratio | value | reading |
+|---|---|---|
+| D / B | **0.820×** | determinism alone costs **18.0%**, cache off both sides |
+| C / D | 0.921× | the cache *costs* 7.9% on this workload rather than paying |
+| C / A | 0.848× | both together — the only comparison vLLM can make |
+
+Two results worth the trip. **The confounded number understates the cost rather
+than inflating it** — the naive 0.848× against the isolated 0.820× — because in
+this workload the two effects partly cancel. And **SGLang eliminated divergence
+outright** (1 distinct output of 128, cache on or off) where vLLM's
+batch-invariant mode left 5 of 128.
+
+The two engines were not run under identical conditions and the writeup says so:
+read them as two measurements, not a controlled comparison.
+
+Still unmeasured: dependence on model size, batch shape and sequence length; why
+vLLM's 5 residual vectors remain; confidence intervals on the 2×2; and SGLang's
+Triton backend.
 
 **What ATTEST does:** demonstrates the divergence under adversarial batch
 composition, proves bitwise reproducibility once invariance is on, **quantifies

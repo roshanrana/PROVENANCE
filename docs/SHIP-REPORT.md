@@ -22,8 +22,10 @@ produced it.
 | SGLang's deterministic mode *does* eliminate divergence | 1 of 128, cache on and off | **Measured** |
 | `cache_salt` exists upstream and is unenforced | vLLM + llm-d source | **Verified by source read** |
 | SGLang has the same unenforced gap, and `extra_key` is the wrong field | `sgl-project/sglang@30705c0` | **Verified by source read** |
-| The tenant-salt plugin closes the routing-index channel | 22 Go tests against real llm-d | **Compiles and passes; never deployed — and see F-18, the chart never puts it in the request path** |
-| The attack works | — | **Not established. No cluster has been stood up.** |
+| The tenant-salt plugin closes the routing-index channel | 22 Go tests against real llm-d | **Compiles and passes; the EPP is now in the request path, but the hardened profile has not been run** |
+| No client-observable routing oracle exists on the simulator | ADR-011, CI run #12, n=402 | **Measured, with a positive control** |
+| A routing-index leak exists to instrument | EPP prefix index: 402 of 404 lookups matched | **Measured** |
+| The attack works against a client | — | **Not established, and ADR-011 says why: it rescopes to FR-B-09 on real vLLM.** |
 
 The last row is the honest state of BARRIER and is why this report does not say
 the project is finished.
@@ -43,11 +45,20 @@ to publish only its successes.
 | 6 | **The guard against #5 had the bug it was written to prevent** — it read a stub-only endpoint, failed open, and produced an H100 result that was the opposite of the truth | A 32-trial cell finishing in **zero seconds** |
 | 7 | The first "invariance fixes it" result was underpowered at 32 trials | Re-running at 128 |
 | 8 | `up.sh` discarded the image reference `ko` produced, so the EPP deploy referenced an image nobody built | Reading the deploy path before the first CI run |
-| 9 | **The chart never wires Envoy to the EPP** — no `ext_proc` filter exists, so the plugin cannot run and the two profiles would behave identically | Same. Recorded as F-18, not yet fixed |
+| 9 | **The chart never wired Envoy to the EPP** — no `ext_proc` filter existed, so the plugin could not run and the two profiles would have behaved identically | Reading the deploy path. Fixed; confirmed by CI run #6 |
+| 10 | `ko`'s `kind.local` publisher cannot tag on a multi-node kind cluster | The first CI run that got that far |
+| 11 | The EPP config had no `apiVersion`/`kind`, named `least-queue-filter` (which does not exist upstream), declared none of its `pluginRef`s, and listed a requestcontrol plugin as a scheduling one | Reading llm-d's own shipped configs |
+| 12 | **S-02 returned ORACLE VIABLE on a millisecond counter**, twice — the refutation was three lines above it in the same output both times | Reading the run rather than the verdict |
+| 13 | The ground-truth gate died on a 401 and reported nothing; then passed on a plugin-duration histogram that proved nothing | The gate's own output making no sense |
 
-**Eight of the nine were caught before or by a number that made no sense.** The
-one that reached a published claim (#6/#7) was amended in place, with the wrong
-run left in `bench/results/` and explained.
+**Twelve of the thirteen were caught before or by a number that made no sense.**
+The one that reached a published claim (#6/#7) was amended in place, with the
+wrong run left in `bench/results/` and explained.
+
+**Three of them — #6, and both halves of #13 — were guards that contained the
+defect they were written to catch.** That is the single most useful pattern this
+project has surfaced about its own methods, and it is why the S-02 ground-truth
+check ended up as tested code rather than a shell one-liner.
 
 ## 3. Gates
 
@@ -74,13 +85,17 @@ a machine with normal egress it is correct as written (ADR-008).
 
 ## 5. What is not done
 
-- **BARRIER has never run.** No cluster, no S-02 verdict, no attack, no
-  statistics. Until it does, BARRIER is a well-tested mitigation for a leak this
-  project has not itself demonstrated, and this report says so rather than
-  implying otherwise.
-  **`.github/workflows/barrier.yml` now runs the spike on any push touching
-  `barrier/**`**, so the verdict arrives as a public CI log rather than a claim —
-  but at the time of writing it has not yet fired.
+- **The hardened profile has never been run.** The topology stands up in CI on
+  every push, the EPP is in the request path, and S-02 has a recorded verdict
+  (ADR-011) — but every run so far is the `default` profile. Until a `hardened`
+  run exists, the mitigation is tested code that has never been exercised
+  against the thing it mitigates, and the two-profile diff that is supposed to
+  be the deliverable has never been measured.
+- **The trust boundary is half-wired.** `proxy.stripInboundHeaders` is rendered;
+  `proxy.injectIdentityHeader` and `proxy.stripInboundBodyFields` are declared in
+  `values-hardened.yaml` and read by no template. Until they are, the hardened
+  profile reads a client-supplied identity header and the mitigation is forgeable
+  at the edge — which is half of what ADR-006 says the mitigation *is*.
 - **No receipt has been signed against a real engine.** The pipeline is
   exercised end to end against the stub (`make attest-demo`, including a
   tamper-detection test); the GPU runs measured divergence and cost but did not

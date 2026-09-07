@@ -277,3 +277,56 @@ cross-engine pattern rather than a single-implementation quirk.
 paragraph. The claim must be stated as *verified by source read at commit `30705c0`*, not
 as measured, until A-03 runs against a live engine — and it must pin a version, since
 llm-d's SGLang manifest targets `lmsysorg/sglang:v0.5.12`, which this spike did not check.
+
+---
+
+## ADR-011 — S-02: no client-observable routing oracle on the simulator; FR-B-03 rescopes
+
+**Date:** 2026-09-07 · **Phase:** 5 · **Status:** accepted · **Resolves:** S-02
+**Evidence:** BARRIER CI run #12, SHA `3c966e2`, `bench/results/s02-run6-2026-09-07.md`
+
+**Context.** BARRIER's attack rests on a premise nobody had tested: can an ordinary API
+caller observe anything that distinguishes a routing cache hit from a miss? LLD §7 fixed
+the consequence of both answers in advance, before any evidence existed.
+
+**Decision.** **No.** FR-B-03 rescopes to an operator-instrumented demonstration; the
+attacker-observable oracle moves entirely to FR-B-09 on real vLLM.
+
+**The measurement**, 404 probes against the two-tenant kind topology, judged by the
+pre-registered rule in `common/stats/decision.py` (NFR-05: AUC ≥ 0.75, CI lower bound
+above chance, p < 0.01 — all three, thresholds untouched since before any attack code):
+
+| channel | AUC | 95% CI | p | n | clears bar |
+|---|---|---|---|---|---|
+| latency | 0.5581 | [0.5026, 0.6138] | 0.0425 | 402 | **no** |
+| `x-envoy-upstream-service-time` | 0.5537 | [0.4984, 0.6090] | 0.0613 | 402 | **no** |
+
+No categorical discriminator was found in any response header or body shape.
+
+**Ground truth**, without which the negative means nothing: the EPP's prefix index was
+consulted 404 times and **matched a non-zero prefix on 402 of them**, mean match ratio
+0.990, index size 8. The router had something to leak. This is a result about
+observability, not about a cluster where nothing was cached.
+
+**Say it precisely: this is "no oracle", not "no effect".** The latency interval's lower
+bound is 0.5026 — above chance — with p = 0.0425. Under the pre-registered rule the result
+is *neither* `attack_succeeds` nor `at_chance`, which is the middle case
+`common/stats/decision.py` was deliberately written to be able to express. A real but tiny
+timing difference exists and is nowhere near strong enough to classify single requests.
+And it almost certainly is not a *cache* signal: the simulator does not vary TTFT on cache
+hit versus miss at all (D-01), so what is being measured is queueing across the two
+simulator pods that prefix affinity concentrates load on.
+
+**Rationale for accepting rather than re-running.** n=402 was fixed in the workflow before
+this run, precisely so the answer could not be reached by stopping when it looked
+convenient. Two earlier runs at n=62 left the interval straddling chance; this one resolves
+it. Running further would be optional stopping.
+
+**Consequences.**
+- FR-B-03 is an instrumented demonstration: the leak is shown from the EPP's own index,
+  which is a claim about a *routing* channel and is what the mitigation actually closes.
+- The attacker-observable oracle is FR-B-09's problem, on real vLLM, where TTFT does vary
+  with cache state. Nothing in this ADR says the oracle is impossible there — it says the
+  simulator cannot answer the question, which is what D-01 predicted.
+- Oracle code may now be written. It could not be before this line existed.
+- The result is publishable as it stands and NFR-17 anticipated it.

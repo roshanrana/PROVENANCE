@@ -667,3 +667,40 @@ the true answer more reachable rather than making `NO SIGNAL` more likely.
 
 Also fixed: the gate reported "consulted 128 times" for 64 probes by summing the
 two published metric families. It reports one, and names it.
+
+---
+
+## S-02 RESOLVED — ADR-011 recorded from run #12
+
+`3c966e2`, green, 404 probes, n=402 per channel.
+
+| channel | AUC | 95% CI | p | clears NFR-05 bar |
+|---|---|---|---|---|
+| latency | 0.5581 | [0.5026, 0.6138] | 0.0425 | no |
+| `x-envoy-upstream-service-time` | 0.5537 | [0.4984, 0.6090] | 0.0613 | no |
+
+No categorical discriminator. **Ground truth: 402 of 404 index lookups matched a
+non-zero prefix**, mean ratio 0.990.
+
+**Verdict: NO CLIENT-OBSERVABLE SIGNAL. FR-B-03 rescopes to an
+operator-instrumented demonstration; the attacker-observable oracle moves to
+FR-B-09 on real vLLM.** Recorded as ADR-011. Oracle code is now unblocked — it
+was not before this line existed.
+
+State it as **"no oracle", not "no effect"**: the latency CI lower bound is
+0.5026, above chance, p=0.0425. The pre-registered rule makes this neither
+`attack_succeeds` nor `at_chance`, which is the middle case
+`common/stats/decision.py` exists to be able to express. On the simulator that
+residue is queueing across the two pods prefix affinity concentrates load onto,
+not a cache signal — D-01 says TTFT does not vary with cache state at all.
+
+## Next
+
+1. **Wire the rest of the trust boundary.** `proxy.injectIdentityHeader` and
+   `proxy.stripInboundBodyFields` are declared and read by no template. Until
+   they are, the hardened profile trusts a client-supplied header and the
+   mitigation is forgeable at the edge — half of what ADR-006 says it is.
+2. **Run the `hardened` profile.** Every run so far is `default`. The
+   two-profile diff is the deliverable and has never been measured.
+3. **FR-B-03 as instrumented demonstration** — the leak is shown from the EPP's
+   own prefix index, which is the channel the mitigation actually closes.

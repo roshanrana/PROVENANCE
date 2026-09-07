@@ -21,18 +21,28 @@
 
 ## Status
 
-**ATTEST measured and published. BARRIER built and compiling, never deployed.**
+**Both workstreams measured and published.**
 
 | | |
 |---|---|
-| Tests | **272 Python + 20 Go passing** |
+| Tests | **308 Python + 22 Go passing** |
 | Gate | `make check` — format, lint, strict types, tests, Go build/vet/test |
-| Measured results | **Determinism costs 18.0% of throughput** on SGLang, isolated from prefix caching; 22.7% on vLLM, confounded with it. Five runs in `bench/results/`, including the ones that were wrong. |
+| ATTEST | **Determinism costs 18.0% of throughput** on SGLang, isolated from prefix caching; 22.7% on vLLM, confounded with it. Batched inference at temperature 0 produced 34 distinct logprob vectors in 128 identical requests; vLLM's batch-invariant mode leaves 5, SGLang's leaves 1. |
+| BARRIER | **The routing-index leak is real and the mitigation closes it.** Same schedule, same pre-registered rule: `default` AUC **1.0000** (p=9.999e-05, n=80), `hardened` AUC **0.5000**, at chance. ADR-012, CI run #15. |
+| Evidence | Runs in `bench/results/` **including the ones that were wrong** — two false-positive verdicts, an H100 result that was the opposite of the truth, and a claim about the trust boundary that a later run withdrew. |
+| Cost | Every GPU number: about **$2.00** of rented H100/A40. Every BARRIER number: **£0**, in public CI on every push. |
 
-Every headline number this README will eventually carry must trace to committed
-raw output plus the exact command and git SHA that produced it. There are no
-placeholder numbers here, and there never will be — an unbacked figure would
-undermine the one thing the project is actually claiming.
+Every number above traces to committed raw output plus the exact command and git
+SHA that produced it. There are no placeholder numbers here, and there never
+were — an unbacked figure would undermine the one thing the project is actually
+claiming.
+
+**The BARRIER result is a confirmation oracle, not an extraction one.** The probe
+sends the victim's prompt verbatim, so a perfect match is by construction: it
+shows that an attacker who can *guess* a prefix gets it confirmed by the routing
+layer, which matters where prompts are predictable. It does not show that unknown
+content can be recovered, and ADR-012 says so at the point of the claim rather
+than in a footnote.
 
 ---
 
@@ -43,7 +53,7 @@ undermine the one thing the project is actually claiming.
 | **The problem** | A regulated institution's shared LLM inference platform cannot reproduce its own outputs for a model validator, and its cache-aware router leaks which prefixes other tenants have used across an information barrier. |
 | **What it does** | ATTEST signed inference receipts, model identity binding to Hugging Face commits and weight digests, resumable measurement harness, pre-registered statistical decision rules, BARRIER tenant-salt threat model, llm-d EPP plugin, default-vs-hardened deployment diff. |
 | **Stack** | Python 3.12, uv, pytest, ruff, mypy, NumPy/SciPy, cryptography/ed25519, Go 1.26, vLLM, **SGLang**, llm-d, Kubernetes/kind, Helm-style manifests. |
-| **Validation** | `make check`, 272 Python + 20 Go tests, coverage gates, `make attest-demo`, receipt tamper tests, bootstrap/permutation/AUC tests, Go salt-derivation and salt-coverage tests compiled against real llm-d, CI mirror of local gates. Hardware-dependent vLLM measurements and kind cluster verification are documented as explicit next gates. |
+| **Validation** | `make check`, 308 Python + 22 Go tests, coverage gates, `make attest-demo`, receipt tamper tests, bootstrap/permutation/AUC tests, Go salt-derivation and salt-coverage tests compiled against real llm-d, CI mirror of local gates. The two-tenant kind topology and both deployment profiles are stood up on **every push**, and the FR-B-03 measurement runs with them. |
 
 ---
 
@@ -127,8 +137,9 @@ the loss of the cache*, and nothing in the harness can separate the two. SGLang
 runs deterministically **with** its radix cache on (`--enable-deterministic-inference`
 on the FA3 or Triton backend). That supplies the missing cell of the
 caching × determinism 2×2 and decomposes the number into its two halves. SGLang
-is here as a **control arm, not as coverage** — the harness is built and tested;
-no measurement has been taken. See `docs/design/07-amendment-sglang.md` and
+is here as a **control arm, not as coverage**: the decomposition is the result,
+not the engine count. Measured on an H100 —
+`bench/results/sglang-2x2-h100-2026-09-07.md`, `docs/design/07-amendment-sglang.md`,
 ADR-009.
 
 ### BARRIER — prefix-cache locality as a cross-tenant leak

@@ -27,7 +27,7 @@
 |---|---|
 | Tests | **272 Python + 20 Go passing** |
 | Gate | `make check` — format, lint, strict types, tests, Go build/vet/test |
-| Measured results | **Stage 1: divergence observed** on an A40 (CC 8.6) — `bench/results/stage1-a40-2026-09-07.md`. Everything else still unmeasured. |
+| Measured results | **Divergence observed, and batch invariance eliminates it** — H100, `bench/results/stage2-h100-2026-09-07.md`. No cost-of-determinism number yet. |
 
 Every headline number this README will eventually carry must trace to committed
 raw output plus the exact command and git SHA that produced it. There are no
@@ -67,11 +67,25 @@ two engines rather than one: see below.
 SR 11-7 and its international analogues assume a model's output can be reproduced
 and validated. Almost nobody has connected these two facts.
 
-**Measured, 2026-09-07:** on an A40, `Qwen2.5-0.5B-Instruct` at temperature 0
-with a fixed seed produced **two distinct logprob vectors across 32 trials**
-(split 24/8) once batch composition varied. The default posture is not
-reproducible — measured, not cited. It says nothing yet about what invariance
-costs; that is the next run.
+**Measured, 2026-09-07, on an H100 (compute capability 9.0).** Same prompt,
+temperature 0, fixed seed, concurrency 16, 32 trials per arm:
+
+| `VLLM_BATCH_INVARIANT` | distinct logprob vectors |
+|---|---|
+| `0` (default) | **6** |
+| `1` | **1** |
+
+The default deployment posture cannot reproduce its own output. The documented
+flag fixes it. Both arms ran on the same card in the same session — vLLM reads
+that variable at import time, so the run is two engine processes over one
+run-id, and the driver refuses any cell whose configuration the live engine does
+not have. `bench/results/stage2-h100-2026-09-07.md` has the full conditions,
+including an earlier run of the same matrix that was **wrong**, why, and how it
+was caught.
+
+**No cost-of-determinism number yet** — the harness records no per-request
+latency, and both arms finished in about a second at this size. That is the next
+gap, not a published figure.
 
 **What ATTEST does:** demonstrates the divergence under adversarial batch
 composition, proves bitwise reproducibility once invariance is on, **quantifies

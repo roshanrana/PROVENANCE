@@ -57,11 +57,9 @@ prefix-cache index is built from:
 ```python
 cache_salt = node.key.cache_salt
 if cache_salt is None:
-    return compute_node_hash_values(node, page_size)   # unsalted, shared
+    return compute_node_hash_values(node, page_size)  # unsalted, shared
 ...
-parent_hash = hashlib.sha256(
-    b"sglang-cache-salt-v1\0" + cache_salt.encode("utf-8")
-).hexdigest()
+parent_hash = hashlib.sha256(b"sglang-cache-salt-v1\0" + cache_salt.encode("utf-8")).hexdigest()
 ```
 
 The salt seeds the hash chain with an explicit domain separator, exactly as our

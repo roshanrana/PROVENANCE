@@ -172,16 +172,15 @@ def read_resolved_state(
             "number from this engine would carry the wrong label."
         )
 
-    return EngineState(
-        vllm_version=str(version.get("version", "unknown")),
-        vllm_git_sha=str(version.get("git_sha", resolved.get("vllm_commit", "unknown"))),
+    return EngineState.for_engine(
+        "vllm",
+        deterministic=config.batch_invariant if observed_invariant is None else observed_invariant,
+        engine_version=str(version.get("version", "unknown")),
+        engine_git_sha=str(version.get("git_sha", resolved.get("vllm_commit", "unknown"))),
         resolved_config=resolved or {"note": "engine exposed no server_info endpoint"},
         attention_backend=str(
             resolved.get("attention_backend") or os.environ.get("VLLM_ATTENTION_BACKEND", "unknown")
         ),
-        batch_invariant=config.batch_invariant
-        if observed_invariant is None
-        else observed_invariant,
         prefix_caching=bool(resolved.get("enable_prefix_caching", config.enable_prefix_caching)),
         speculative_decoding=bool(resolved.get("speculative_config") or False),
         tensor_parallel_size=int(resolved.get("tensor_parallel_size", config.tensor_parallel_size)),

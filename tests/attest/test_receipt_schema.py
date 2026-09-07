@@ -32,13 +32,14 @@ def make_receipt(**over: Any) -> Receipt:
             weights_lfs_sha256="f" * 64,
             resolution="online",
         ),
-        engine=EngineState(
-            vllm_version="0.11.0",
-            vllm_git_sha="deadbee",
+        engine=EngineState.for_engine(
+            "vllm",
+            deterministic=True,
+            engine_version="0.11.0",
+            engine_git_sha="deadbee",
             # D-08: what the engine RESOLVED, not what the operator passed.
             resolved_config={"cudagraph_mode": "PIECEWISE", "enforce_eager": False},
             attention_backend="FLASH_ATTN",
-            batch_invariant=True,
             prefix_caching=False,
             speculative_decoding=False,
             tensor_parallel_size=1,
@@ -122,7 +123,7 @@ def test_unknown_nested_field_is_rejected() -> None:
     "section,field",
     [
         ("model", "commit_sha"),
-        ("engine", "batch_invariant"),
+        ("engine", "deterministic"),
         ("sampling", "seed"),
         ("output", "logprobs_sha256"),
         ("run", "run_id"),
@@ -142,10 +143,37 @@ def test_unknown_predicate_major_version_is_rejected() -> None:
         Receipt.from_statement(doc)
 
 
-def test_same_major_different_minor_is_accepted() -> None:
+def test_an_older_minor_is_rejected_because_under_0x_minors_are_breaking() -> None:
+    """v0.1 predates the engine discriminator (ADR-009).
+
+    Accepting it would mean parsing a receipt whose ``engine`` field does not
+    exist and then reporting "missing required field", sending the reader after
+    a corrupted document instead of an old one.
+    """
     doc = make_receipt().to_statement()
-    doc["predicateType"] = "https://provenance.dev/attestation/v0.2"
-    assert Receipt.from_statement(doc).run.cell_id == "c0001"
+    doc["predicateType"] = "https://provenance.dev/attestation/v0.1"
+    with pytest.raises(ReceiptSchemaError, match=r"0\.1 receipts predate"):
+        Receipt.from_statement(doc)
+
+
+def test_a_receipt_cannot_claim_determinism_by_the_other_engines_mechanism() -> None:
+    """An SGLang run naming VLLM_BATCH_INVARIANT is internally inconsistent.
+
+    Nothing else in the pipeline would notice: the signature would verify, the
+    subject digest would match, and the receipt would assert a configuration
+    that never existed.
+    """
+    doc = make_receipt().to_statement()
+    doc["predicate"]["engine"]["engine"] = "sglang"
+    with pytest.raises(ReceiptSchemaError, match="is not how"):
+        Receipt.from_statement(doc)
+
+
+def test_an_unknown_engine_is_rejected() -> None:
+    doc = make_receipt().to_statement()
+    doc["predicate"]["engine"]["engine"] = "tensorrt-llm"
+    with pytest.raises(ReceiptSchemaError, match=r"engine\.engine not recognised"):
+        Receipt.from_statement(doc)
 
 
 def test_foreign_statement_type_is_rejected() -> None:

@@ -39,7 +39,7 @@ Stub control (env or constructor):
 ```python
 class StubEngine:
     divergence_mode: Literal["none", "batch_dependent", "random"]
-    resolved_config_overrides: dict[str, Any]   # must differ from requested, on purpose
+    resolved_config_overrides: dict[str, Any]  # must differ from requested, on purpose
     latency_profile: Literal["instant", "fixed", "jittered"]
 ```
 

@@ -21,10 +21,24 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Literal
 
 STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
-PREDICATE_TYPE = "https://provenance.dev/attestation/v0.1"
+PREDICATE_TYPE = "https://provenance.dev/attestation/v0.2"
 PREDICATE_MAJOR = 0
+PREDICATE_MINOR = 2
 
 Resolution = Literal["online", "offline", "unresolved"]
+
+#: The inference engines ATTEST can attest to (ADR-009). The discriminator is
+#: explicit rather than inferred from a version string, because a receipt that
+#: leaves the reader guessing which engine produced it is not an attestation.
+Engine = Literal["vllm", "sglang"]
+
+#: How each engine is made deterministic. Recorded verbatim in the receipt so a
+#: validator can reproduce the run without knowing our conventions — and so the
+#: two mechanisms are never conflated, which is the point of ADR-009.
+DETERMINISM_MECHANISM: dict[Engine, str] = {
+    "vllm": "VLLM_BATCH_INVARIANT=1",
+    "sglang": "--enable-deterministic-inference",
+}
 
 
 class ReceiptSchemaError(ValueError):
@@ -99,21 +113,46 @@ class ModelIdentity:
 
 @dataclass(frozen=True)
 class EngineState:
-    vllm_version: str
-    vllm_git_sha: str
+    """What the engine actually resolved to, read back rather than assumed (D-08).
+
+    **Amended for ADR-009.** Two naming decisions here are load-bearing, and both
+    exist to stop a receipt asserting something it has not established.
+
+    ``deterministic`` is engine-neutral: it means *this engine was configured to
+    produce the same output for the same input regardless of what else shared the
+    batch*. The previous field was called ``batch_invariant``, which is vLLM's
+    name for its own mechanism. Reusing it for SGLang would have put a vLLM
+    implementation term on a run that never used vLLM's kernels — the same class
+    of mislabelling the readback exists to prevent, just one level up.
+
+    ``determinism_mechanism`` carries the engine-specific truth alongside it, so
+    nothing is lost by generalising. A validator reads
+    ``VLLM_BATCH_INVARIANT=1`` or ``--enable-deterministic-inference`` and can
+    reproduce the run without knowing our conventions.
+
+    ``engine`` is stored explicitly rather than inferred from the version string.
+    A reader should never have to guess which engine produced a receipt.
+    """
+
+    engine: Engine
+    engine_version: str
+    engine_git_sha: str
     resolved_config: Mapping[str, Any]
     attention_backend: str
-    batch_invariant: bool
+    deterministic: bool
+    determinism_mechanism: str
     prefix_caching: bool
     speculative_decoding: bool
     tensor_parallel_size: int
 
     _FIELDS: ClassVar[set[str]] = {
-        "vllm_version",
-        "vllm_git_sha",
+        "engine",
+        "engine_version",
+        "engine_git_sha",
         "resolved_config",
         "attention_backend",
-        "batch_invariant",
+        "deterministic",
+        "determinism_mechanism",
         "prefix_caching",
         "speculative_decoding",
         "tensor_parallel_size",
@@ -121,11 +160,13 @@ class EngineState:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "vllm_version": self.vllm_version,
-            "vllm_git_sha": self.vllm_git_sha,
+            "engine": self.engine,
+            "engine_version": self.engine_version,
+            "engine_git_sha": self.engine_git_sha,
             "resolved_config": dict(self.resolved_config),
             "attention_backend": self.attention_backend,
-            "batch_invariant": self.batch_invariant,
+            "deterministic": self.deterministic,
+            "determinism_mechanism": self.determinism_mechanism,
             "prefix_caching": self.prefix_caching,
             "speculative_decoding": self.speculative_decoding,
             "tensor_parallel_size": self.tensor_parallel_size,
@@ -136,15 +177,46 @@ class EngineState:
         _reject_unknown(doc, set(cls._FIELDS), "engine")
         for key in cls._FIELDS:
             _require(doc, key, "engine")
+        engine = doc["engine"]
+        if engine not in DETERMINISM_MECHANISM:
+            raise ReceiptSchemaError(
+                f"engine.engine not recognised: {engine!r} (known: {sorted(DETERMINISM_MECHANISM)})"
+            )
+        mechanism = str(doc["determinism_mechanism"])
+        # A receipt claiming determinism by a mechanism that does not belong to
+        # the engine it names is internally inconsistent, and a validator should
+        # be told so rather than left to notice.
+        if bool(doc["deterministic"]) and mechanism != DETERMINISM_MECHANISM[engine]:
+            raise ReceiptSchemaError(
+                f"engine.determinism_mechanism {mechanism!r} is not how {engine!r} "
+                f"is made deterministic (expected {DETERMINISM_MECHANISM[engine]!r})"
+            )
         return cls(
-            vllm_version=doc["vllm_version"],
-            vllm_git_sha=doc["vllm_git_sha"],
+            engine=engine,
+            engine_version=doc["engine_version"],
+            engine_git_sha=doc["engine_git_sha"],
             resolved_config=dict(doc["resolved_config"]),
             attention_backend=doc["attention_backend"],
-            batch_invariant=bool(doc["batch_invariant"]),
+            deterministic=bool(doc["deterministic"]),
+            determinism_mechanism=mechanism,
             prefix_caching=bool(doc["prefix_caching"]),
             speculative_decoding=bool(doc["speculative_decoding"]),
             tensor_parallel_size=int(doc["tensor_parallel_size"]),
+        )
+
+    @classmethod
+    def for_engine(cls, engine: Engine, *, deterministic: bool, **rest: Any) -> EngineState:
+        """Construct with the mechanism string filled in from the engine.
+
+        Callers should not be retyping ``VLLM_BATCH_INVARIANT=1`` at each site;
+        one typo there would produce a receipt that fails its own consistency
+        check at verify time, long after the GPU has been released.
+        """
+        return cls(
+            engine=engine,
+            deterministic=deterministic,
+            determinism_mechanism=DETERMINISM_MECHANISM[engine],
+            **rest,
         )
 
 
@@ -294,16 +366,31 @@ class Receipt:
 
 
 def check_predicate_type(predicate_type: str) -> None:
-    """Reject an unknown predicate major version (LLD §9)."""
+    """Reject a predicate version this build cannot read (LLD §9).
+
+    Under a ``0.x`` major, a minor bump is a breaking change — that is what a
+    zero major *means* — so v0.1 is refused rather than parsed. The refusal names
+    the version, because "missing required field: engine.engine" on a v0.1
+    receipt would send a reader looking for a corrupted document instead of an
+    old one.
+    """
     if not predicate_type.startswith("https://provenance.dev/attestation/v"):
         raise ReceiptSchemaError(f"unsupported predicateType: {predicate_type!r}")
     version = predicate_type.rsplit("/v", 1)[1]
+    parts = version.split(".")
     try:
-        major = int(version.split(".")[0])
+        major = int(parts[0])
+        minor = int(parts[1]) if len(parts) > 1 else 0
     except ValueError as exc:
         raise ReceiptSchemaError(f"unparseable predicate version: {predicate_type!r}") from exc
     if major != PREDICATE_MAJOR:
         raise ReceiptSchemaError(
             f"unsupported predicate major version {major} (this build understands "
             f"{PREDICATE_MAJOR}): {predicate_type!r}"
+        )
+    if major == 0 and minor != PREDICATE_MINOR:
+        raise ReceiptSchemaError(
+            f"unsupported predicate version 0.{minor} (this build understands "
+            f"0.{PREDICATE_MINOR}); under a 0.x major every minor is breaking. "
+            f"v0.1 receipts predate the engine discriminator added by ADR-009."
         )

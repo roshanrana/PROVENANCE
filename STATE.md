@@ -183,3 +183,54 @@ None beyond the Phase 0 gate.
 ## Deviations
 
 None.
+
+---
+
+## Session 2026-09-07 — amendment A-01 (SGLang), accepted and partly executed
+
+### Findings
+
+- **F-07 — the tenant-salt plugin had never compiled.** `body.TokenizedRequest`
+  does not exist in `llm-d-router@v0.10.0`; the field is `TokenizedPrompt`. Every
+  earlier statement about that package described code no compiler had seen.
+- **F-08 — `ApplySalt` never salted `body.Generate`.** It carries `CacheSalt` and
+  `tokenizer.CacheSaltFromBody` reads it, so the pre-tokenized surface routed in
+  the shared namespace while the hardened profile reported itself hardened. Both
+  fixed in `ec00137`, with tests that interrogate upstream rather than restate a
+  list, so a dependency bump cannot silently reopen the channel.
+- **F-09 — ADR-008's block was a guess.** T-003 was marked blocked on the Go
+  toolchain without re-testing. Go 1.26.6 builds from source in this container,
+  and the module graph resolves with a scratch-only `replace` overlay mapping
+  vanity paths to GitHub (egress blocks `proxy.golang.org` and every vanity
+  host). BARRIER's Go now builds, vets and tests here — which is how F-07 and
+  F-08 were found. **A limit that has not been re-tested is a guess.**
+- **F-10 — the design record was never committed.** `docs/design/`, `docs/tasks/`,
+  `STATE.md` and the two handoff sets existed only outside the repository, while
+  `README.md` pointed at an empty `docs/design/`. Restored in `aa8250b`.
+- **F-11 — SGLang's determinism composes with its cache; vLLM's does not.** This
+  is what made the amendment worth taking (ADR-009).
+- **F-12 — SGLang takes `cache_salt`, not `extra_key`.** S-03's verdict. Same
+  wire field as vLLM, salting both the radix tree and the published KV events.
+  `extra_key` — the field SGLang's own docs show for multi-tenancy — namespaces
+  the tree but not the event hashes, so building on it would leave llm-d's
+  routing index shared (ADR-010).
+
+### State
+
+`make check`: ruff, ruff-format, mypy strict, **272 Python tests** — all pass.
+Go: `go build ./...`, `go vet ./...` clean and **20 tests** passing on Go 1.26.6.
+The `go-check` Makefile target still fails *in this container only*, because it
+invokes the system Go, which tries to fetch the pinned toolchain through the
+blocked proxy. On a machine with normal egress it is correct as written.
+
+Receipt predicate is now **v0.2**. v0.1 is refused by name. No receipt had been
+published, so nothing was invalidated.
+
+### Still waiting on hardware or credentials
+
+1. Push `provenance.bundle` to GitHub (the git proxy refuses this repo).
+2. Cluster bring-up and the **S-02** spike — verdict must reach `decisions.md`
+   before any oracle code. Unchanged by this amendment.
+3. **T-028** GPU session, staged stage 1 → human decision → stage 2. **A-03**
+   (the caching × determinism 2×2) is now an explicit stage-2 option; it is not
+   scheduled, and if stage 1 shows no divergence at 0.5B it is moot.

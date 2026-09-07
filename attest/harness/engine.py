@@ -91,12 +91,16 @@ class EngineClient:
         payload = self._get("/_stub/resolved_config")
         version, git_sha = self.version()
         try:
-            return EngineState(
-                vllm_version=version,
-                vllm_git_sha=git_sha,
+            # The stub speaks vLLM's dialect, so the engine discriminator is
+            # fixed here rather than probed. A real SGLang engine is read by
+            # attest.harness.sglang.read_resolved_state, not through this path.
+            return EngineState.for_engine(
+                "vllm",
+                deterministic=bool(payload["batch_invariant"]),
+                engine_version=version,
+                engine_git_sha=git_sha,
                 resolved_config=payload["resolved_config"],
                 attention_backend=payload["attention_backend"],
-                batch_invariant=bool(payload["batch_invariant"]),
                 prefix_caching=bool(payload["prefix_caching"]),
                 speculative_decoding=bool(payload["speculative_decoding"]),
                 tensor_parallel_size=int(payload["tensor_parallel_size"]),

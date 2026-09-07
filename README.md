@@ -21,12 +21,12 @@
 
 ## Status
 
-**Design complete and approved. ATTEST built and tested. BARRIER in progress.**
+**Design complete and approved. ATTEST built and tested. BARRIER built and compiling, not yet deployed.**
 
 | | |
 |---|---|
-| Tests | **250 passing**, 93% coverage |
-| Gate | `make check` — format, lint, strict types, tests, Go gates |
+| Tests | **272 Python + 20 Go passing** |
+| Gate | `make check` — format, lint, strict types, tests, Go build/vet/test |
 | Measured results | **None yet.** No number is published until it has evidence behind it. |
 
 Every headline number this README will eventually carry must trace to committed
@@ -49,6 +49,10 @@ vLLM ships batch-invariant kernels (`VLLM_BATCH_INVARIANT=1`) that fix this. The
 flag is **engine-wide, not per-request**: one caller who needs determinism imposes
 the cost on everyone sharing that engine.
 
+It also **cannot be combined with prefix caching** — the two are not integrated
+upstream. That matters more than it sounds, and it is why this project measures
+two engines rather than one: see below.
+
 SR 11-7 and its international analogues assume a model's output can be reproduced
 and validated. Almost nobody has connected these two facts.
 
@@ -62,6 +66,16 @@ The receipt anchors model identity to the **Hugging Face Hub commit SHA and weig
 LFS digest**, not a locally computed hash. A validator who does not trust us can
 confirm it against a root we do not control. That is the difference between an
 attestation and a log line.
+
+**Why two engines.** On vLLM, turning determinism on means turning the prefix
+cache off — so a naive "cost of determinism" number is really *determinism plus
+the loss of the cache*, and nothing in the harness can separate the two. SGLang
+runs deterministically **with** its radix cache on (`--enable-deterministic-inference`
+on the FA3 or Triton backend). That supplies the missing cell of the
+caching × determinism 2×2 and decomposes the number into its two halves. SGLang
+is here as a **control arm, not as coverage** — the harness is built and tested;
+no measurement has been taken. See `docs/design/07-amendment-sglang.md` and
+ADR-009.
 
 ### BARRIER — prefix-cache locality as a cross-tenant leak
 
@@ -89,6 +103,17 @@ diff between `values-default.yaml` and `values-hardened.yaml` is three changes,
 and that small diff is the point: a real gap closes with one plugin and one proxy
 rule.
 
+**The gap is not a vLLM quirk.** SGLang — a first-class engine in llm-d, with its
+own KV-events adapter and manifests — takes the same `cache_salt` field, salts
+both its radix tree and the KV events it publishes with it, and **falls back to
+one shared namespace when it is absent**. Two independent engines, the same
+unenforced control. One trap worth naming: SGLang's own prefix-caching docs show
+`extra_key` for multi-tenancy, and `extra_key` is the *wrong* field here — it
+namespaces the engine's tree but is not folded into the published event hash, so
+a mitigation built on it would leave the routing-derived index shared. Read from
+source at commit `30705c0`; not yet confirmed against a running engine
+(`docs/design/spikes/S-03-sglang-cache-salt.md`).
+
 ---
 
 ## Quickstart
@@ -115,7 +140,7 @@ make barrier-diff   # the mitigation, as a diff
 
 | | Needs | Why |
 |---|---|---|
-| ATTEST measurements | One NVIDIA GPU, compute capability ≥ 8.0 | Batch invariance is CUDA/Triton. AMD untested upstream, CPU unsupported. |
+| ATTEST measurements | One NVIDIA GPU, compute capability ≥ 8.0 | Batch invariance is CUDA/Triton. AMD untested upstream, CPU unsupported. SGLang's deterministic mode needs FA3 or Triton to keep the radix cache. |
 | BARRIER cluster demo | Docker + kind | Two-tenant llm-d topology, simulator-backed — **no GPU** |
 | BARRIER timing oracle | Real vLLM on a GPU | The llm-d simulator does not vary TTFT on cache hits |
 
@@ -125,7 +150,7 @@ make barrier-diff   # the mitigation, as a diff
 
 ```
 common/stats/     AUC, bootstrap CI, permutation test, the pre-registered rule
-attest/harness/   matrix · ledger · engine client · vLLM lifecycle · run driver
+attest/harness/   matrix · ledger · engine client · vLLM + SGLang lifecycle · run driver
 attest/receipt/   in-toto schema · JCS canonicalisation · ed25519 · verify CLI
 attest/analysis/  divergence tables · cost-of-determinism with CIs
 barrier/epp/      Go: the tenant-salt plugin + custom EPP binary
@@ -156,6 +181,12 @@ brief and each was found by **reading source rather than documentation**:
    no fork is needed.
 3. **`cache_salt` reaches vLLM's own cache too**, so one derived salt can close
    both channels — provided the plugin rewrites the outbound request body.
+4. **The plugin had never compiled.** It referenced a field that does not exist in
+   llm-d, and it never salted the pre-tokenized `/generate` path — so the
+   "hardened" profile would have reported itself hardened while that surface
+   routed in the shared namespace. Both found by building it, not by reading it,
+   and both now held closed by tests that ask upstream what the hasher reads
+   rather than restating a list.
 
 ### On statistics
 

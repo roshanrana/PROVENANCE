@@ -355,6 +355,27 @@ statistical test a headline claim of the project — a reviewer should be able t
 forty lines rather than trust a library call. This is one of the few places where writing
 it ourselves is the *more* credible choice, and NFR-13's 80% bar applies here hardest.
 
+### 7.4a Inference engines *(amended by ADR-009)*
+
+Two, behind one seam. `attest.harness.engine.EngineClient` speaks the OpenAI-compatible
+surface both engines expose, so the run driver, ledger, receipt and analysis code are
+engine-agnostic and were not touched by the amendment. What differs is process lifecycle
+and configuration readback, and each engine owns a module for exactly that:
+
+| | `attest/harness/vllm.py` | `attest/harness/sglang.py` |
+|---|---|---|
+| Determinism switch | `VLLM_BATCH_INVARIANT=1`, exported **before** the process starts (read at import) | `--enable-deterministic-inference`, a command-line flag |
+| Prefix caching under determinism | not integrated upstream — pinned off (D-06) | supported on FA3 and Triton; **defaults on** |
+| Backend constraint | CUDA/Triton, compute capability ≥ 8.0 | FlashInfer is refused when determinism and caching are both wanted |
+| Readback endpoint | `/version` + `/v1/server_info` | `/get_server_info` |
+
+The receipt records `engine`, `engine_version`, `deterministic` and
+`determinism_mechanism` — the last verbatim, so a validator reproduces the run without
+knowing our conventions and the two mechanisms can never be conflated. `EngineState`
+refuses a receipt claiming determinism by the other engine's mechanism.
+
+**Not a plugin architecture.** Two engines do not justify a registry; a third would.
+
 ### 7.5 Go plugin delivery *(resolves S-01)*
 
 Confirmed from source: `plugin.Register(type, stability, FactoryFunc)` writes to an exported

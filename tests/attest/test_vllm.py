@@ -139,10 +139,12 @@ def test_matching_invariance_is_accepted() -> None:
 
     with _mock_client(handler) as client:
         state = read_resolved_state("http://engine", _config(batch_invariant=True), client=client)
-    assert state.batch_invariant is True
+    assert state.deterministic is True
+    assert state.engine == "vllm"
+    assert state.determinism_mechanism == "VLLM_BATCH_INVARIANT=1"
     assert state.prefix_caching is False
     assert state.attention_backend == "FLASH_ATTN"
-    assert state.vllm_version == "0.11.0"
+    assert state.engine_version == "0.11.0"
 
 
 def test_missing_server_info_does_not_crash_the_run() -> None:

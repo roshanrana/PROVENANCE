@@ -201,3 +201,40 @@ learned in M0 routinely improve them, and paying for detail that will be rewritt
 The task table above is complete from day one regardless.
 
 Browse packs at `docs/tasks/`.
+
+---
+
+## Amendment A-01 — SGLang (accepted 2026-09-07)
+
+Rationale in `docs/design/07-amendment-sglang.md`; decision in ADR-009. Admitted narrowly:
+**no GPU minute is committed by the amendment**, and nothing here sits on the critical path.
+Every item runs in the environment that is otherwise idle waiting on hardware.
+
+| ID | Task | Env | Size | Status |
+|---|---|---|---|---|
+| S-03 | Spike: does an SGLang wire field reach the radix cache namespace key? | container | S | **DONE** — verdict in `docs/design/spikes/S-03-sglang-cache-salt.md`, ADR-010 |
+| T-038a | Fix `ApplySalt`: `TokenizedPrompt`, and the missing `Generate` variant | container | S | **DONE** — `ec00137` |
+| A-01 | `attest/harness/sglang.py` — lifecycle, readback, refusals | container | M | **DONE** |
+| A-02 | Generalise `EngineState` over an engine discriminator; predicate v0.2 | container | S | **DONE** |
+| A-03 | The caching × determinism 2×2, both engines, one model | **GPU** | L | **Held** — stage-2 option under T-028's existing decision point |
+| A-04 | Test that the derived salt reaches the engine as `cache_salt` on the pre-tokenized path; threat-model paragraph on the `extra_key` trap | container | S | Backlog |
+| A-05 | Two-engine llm-d topology in the kind chart | cluster | M | Backlog |
+
+**A-04 shrank because S-03 came back affirmative.** It was scoped as "extend the mitigation
+to whatever field SGLang uses"; SGLang uses `cache_salt`, the same field, so the mitigation
+needs no change and what remains is an assertion plus a documented trap.
+
+**A-03 is deliberately not scheduled.** T-028 is already staged stage 1 → human decision →
+stage 2. If stage 1 shows no divergence at 0.5B, the 2×2 is moot and the hours are saved;
+adding it as a stage-2 option costs nothing until that decision is taken. Any A-03 run must
+pin the SGLang version and endpoint, because `sgl-project/sglang#15481` reports seeded
+determinism misbehaving on `/v1/completions`.
+
+### Risk this adds
+
+**RSK-06 — the second engine reads as breadth rather than depth.** Mitigated by framing, not
+by code: the write-up must lead with the decomposition (what determinism costs, separately
+from what losing the cache costs) and never with coverage. "Also supports SGLang" is a
+weaker line than one deep result, and shipping it that way would make the amendment a net
+loss. If A-03 does not run, the SGLang arm is described as built-and-unmeasured and no
+number is published for it — the same rule as everywhere else.

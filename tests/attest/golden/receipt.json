@@ -3,16 +3,18 @@
   "predicate": {
     "engine": {
       "attention_backend": "FLASH_ATTN",
-      "batch_invariant": true,
+      "determinism_mechanism": "VLLM_BATCH_INVARIANT=1",
+      "deterministic": true,
+      "engine": "vllm",
+      "engine_git_sha": "deadbee",
+      "engine_version": "0.11.0",
       "prefix_caching": false,
       "resolved_config": {
         "cudagraph_mode": "PIECEWISE",
         "enforce_eager": false
       },
       "speculative_decoding": false,
-      "tensor_parallel_size": 1,
-      "vllm_git_sha": "deadbee",
-      "vllm_version": "0.11.0"
+      "tensor_parallel_size": 1
     },
     "model": {
       "commit_sha": "7ae557604adf67be50417f59c2c2f167def9a775",
@@ -45,7 +47,7 @@
       "top_p": 1.0
     }
   },
-  "predicateType": "https://provenance.dev/attestation/v0.1",
+  "predicateType": "https://provenance.dev/attestation/v0.2",
   "subject": [
     {
       "digest": {

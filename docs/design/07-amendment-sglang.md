@@ -1,6 +1,7 @@
 # Amendment A-01 — adding SGLang
 
-**Status:** PROPOSED — awaiting decision. Nothing in this document has been built.
+**Status:** ACCEPTED 2026-09-07, per the recommendation in §6. See ADR-009 and ADR-010.
+**Outcome:** S-03, A-01 and A-02 are done; A-03 is held behind T-028's decision point; A-04 shrank (S-03 came back affirmative) and A-05 is backlogged. Progress is tracked in `docs/design/04-execution-plan.md`.
 **Raised:** 2026-09-07, mid-build, against an approved plan.
 **Affects:** 01-requirements (D-06, FR set), 02-hld §7, 04-execution-plan (new tasks), decisions.md.
 
@@ -92,6 +93,22 @@ proposed.
 
 ### 2.2 Open, and the reason to be careful
 
+> **RESOLVED by S-03 (2026-09-07).** The concern below was well-founded but the
+> answer was better than feared: SGLang accepts **`cache_salt`** — llm-d's own
+> field name, and a *separate* field from `extra_key` — on `/generate`,
+> `/v1/completions`, `/v1/chat/completions` and responses, and it salts the KV
+> events it publishes as well as its own radix tree. Obligation 3 is met on
+> SGLang with no change to the plugin. See
+> `docs/design/spikes/S-03-sglang-cache-salt.md` and ADR-010.
+>
+> The paragraphs below are left as written, because the reasoning that led to
+> running the spike is worth keeping — and because one thing they get wrong is
+> instructive: `extra_key` **is** the wrong field, just not for the reason
+> guessed here. It namespaces the in-process tree but is not folded into the
+> published event hash, so a mitigation built on it would leave the
+> routing-derived index shared. It is also the field SGLang's own documentation
+> shows for multi-tenancy.
+
 SGLang's radix cache **does** support namespace isolation: `RadixKey` carries an
 `extra_key`, populated from `req.extra_key`, and entries with different
 `extra_key` values are kept deliberately disjoint. That is structurally the same
@@ -141,6 +158,14 @@ Stated plainly, so the amendment cannot be oversold:
 - **Nothing about ATTEST's receipts changes.** Model identity still anchors to
   the Hugging Face commit SHA and weight digest, which is engine-agnostic. The
   `EngineState` block gains a variant; the attestation format does not.
+  *Correction, post-implementation:* this was half wrong. The predicate went
+  **v0.1 → v0.2** — `vllm_version`/`batch_invariant` became
+  `engine_version`/`deterministic` plus an explicit `engine` discriminator,
+  because reusing vLLM's term for an SGLang run would put a vLLM implementation
+  name on a run that never used vLLM's kernels. Under a 0.x major that is a
+  breaking change and v0.1 receipts are refused by name. No receipt had been
+  published, so nothing was invalidated — but the amendment should not have
+  claimed the format was untouched.
 - **It costs GPU hours**, and GPU hours are the project's scarcest input. See §5.
 
 ---

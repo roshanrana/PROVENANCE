@@ -46,11 +46,15 @@ fails to show the expected effect is a finding, not an embarrassment.
 | Architecture + stack | `docs/design/02-hld.md` |
 | **Frozen contracts** | `docs/design/03-lld.md` §4 |
 | Task table + waves | `docs/design/04-execution-plan.md` |
-| Orchestration runbook | `docs/design/05-orchestration.md` |
+| Orchestration runbook | `handoff/claude-code/RUNBOOK.md` |
+| **Measured results** | `bench/results/` — including the runs that were wrong |
+| Ship report | `docs/SHIP-REPORT.md` |
 | Decisions (append-only) | `docs/design/decisions.md` |
 | Task packs | `docs/tasks/T-###-*.md` |
 
 ## Toolchain
 
-Python 3.12 via **uv** (`uv run …`, never bare `python`). Go 1.24 in `barrier/epp` only.
+Python 3.12 via **uv** (`uv run …`, never bare `python`). **Go 1.26.6** in `barrier/epp`
+only — llm-d-router v0.10.0 declares it, and an older toolchain cannot resolve the module
+(ADR-008).
 `make check` runs both. Commit messages start with the task ID: `T-014: add …`.

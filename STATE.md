@@ -608,3 +608,39 @@ containing the bug it was written to prevent. Worth naming as a pattern rather
 than as two coincidences.
 
 **S-02's verdict remains unrecorded.**
+
+---
+
+## Finding F-26 — the ground-truth gate passed on evidence that proved nothing
+
+Run #10 (`8592807`) went green: the metrics endpoint answered `200`, the gate
+found "prefix" in the dump and let the verdict stand. What it actually found
+was:
+
+```
+inference_extension_plugin_duration_seconds_bucket{
+    plugin_name="approx-prefix-cache-producer", ...} 64
+```
+
+That is a *timing histogram for a plugin whose name contains "prefix"*. It
+proves the producer executed on all 64 probes. It says **nothing** about whether
+the index ever matched a prefix — which is the only fact the control needs, and
+the entire reason the gate was added one run earlier.
+
+So the gate reproduced, in itself, the defect it exists to catch: it could not
+distinguish "no client-observable signal" from "the router never indexed a
+prefix". Third instance of that shape (ship-report defect #6, F-25, now this).
+
+**Fix.** The assertion moves out of a `grep` in the workflow and into
+`barrier/attack/ground_truth.py`, with eight tests — including one built from
+the exact metric line that fooled the grep. It reads the
+`prefix_indexer_hit_ratio` histogram (either published family, so an upstream
+rename cannot silently disarm it), subtracts the `le="0"` bucket from the
+observation count, and requires the remainder to be positive:
+
+    lookups > 0  and  lookups − matched-nothing > 0
+
+A gate written as an untested shell one-liner is a gate nobody has checked. This
+one fails the build if its own logic breaks.
+
+**S-02's verdict remains unrecorded.** Run #11 is the first that can earn it.

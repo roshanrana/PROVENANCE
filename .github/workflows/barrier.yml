@@ -145,22 +145,20 @@ jobs:
           kubectl -n provenance logs -l app=provenance-epp --tail=3000 \
             > bench/results/epp-ground-truth/epp.log
 
-          echo "--- prefix-cache metrics the EPP reports ---"
-          grep -iE 'prefix' bench/results/epp-ground-truth/metrics.txt | grep -v '^#' | head -40 || true
+          echo "--- prefix index metrics ---"
+          grep -E 'prefix_indexer' bench/results/epp-ground-truth/metrics.txt | grep -v '^#' || true
           echo "--- scheduling activity in the EPP log ---"
           grep -icE 'prefix|scored|picked|endpoint' bench/results/epp-ground-truth/epp.log || true
 
-          if ! grep -qiE 'prefix' bench/results/epp-ground-truth/metrics.txt; then
-            echo "GROUND TRUTH MISSING: the EPP reports no prefix-cache metric." >&2
-            echo "  HTTP status was ${code:-none}; first lines of what it did return:" >&2
-            head -20 bench/results/epp-ground-truth/metrics.txt >&2 || true
-            echo "  metric families present:" >&2
-            grep '^# TYPE' bench/results/epp-ground-truth/metrics.txt | head -40 >&2 || true
-            echo "  'no client-observable signal' and 'the router never indexed a prefix'" >&2
-            echo "  are different findings, and this run cannot tell them apart. The" >&2
-            echo "  spike's verdict must NOT be recorded from this run." >&2
-            exit 5
-          fi
+          # The assertion is in committed, unit-tested code rather than in a
+          # grep here. The grep version passed on a plugin *named* prefix having
+          # executed, which proves nothing about whether the index ever matched
+          # (F-26) — and a gate that cannot be tested is a gate nobody has
+          # checked. `barrier.attack.ground_truth` reads the hit-ratio histogram
+          # and requires a non-zero match; exit 5 means the spike's verdict must
+          # not be recorded from this run.
+          uv run python -m barrier.attack.ground_truth \
+            bench/results/epp-ground-truth/metrics.txt
 
       - name: Collect cluster state on failure
         if: failure()

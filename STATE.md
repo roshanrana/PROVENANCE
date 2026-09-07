@@ -577,3 +577,34 @@ and the three things a reader should check to hold us to that — is in
 
 **S-02's verdict remains unrecorded.** Nothing reaches `decisions.md` until a run
 under the corrected rule returns one.
+
+---
+
+## Finding F-25 — the ground-truth gate failed for a reason that had nothing to do with ground truth
+
+Run #9 (`079cbfd`) went through the topology, the port-forward and the spike,
+then died in the new **Capture the EPP's ground truth** step with `exit code 22`
+after thirty identical `Handling connection for 9090` lines.
+
+Exit 22 is `curl -f` refusing an HTTP error status. The EPP requires a bearer
+token on `/metrics` by default, so the endpoint was answering `401` the whole
+time — healthy, reachable, and rejected by the readiness loop as if it were
+down. The step then reported nothing about the EPP at all.
+
+Two fixes, and the second matters more than the first:
+
+1. `--metrics-endpoint-auth=false` on the EPP. Its metrics are the *only* ground
+   truth for whether the prefix index ever recorded a match. Off here because
+   this is a single-tenant kind cluster with no ingress to that port; upstream's
+   own chart gates the flag the same way.
+2. **The gate now says what it saw.** Any HTTP status counts as "up"; the status
+   code is echoed; and on failure it prints the response head and the list of
+   metric families present. A gate whose failure message is silence cannot
+   distinguish the thing it was built to distinguish — which is precisely the
+   defect it exists to catch, reproduced in the guard itself.
+
+That last shape has now appeared twice: ship-report defect #6 was a guard
+containing the bug it was written to prevent. Worth naming as a pattern rather
+than as two coincidences.
+
+**S-02's verdict remains unrecorded.**

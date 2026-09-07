@@ -109,6 +109,13 @@ spec:
             # and a self-signed handshake inside one kind cluster would add a
             # moving part without adding a claim.
             - --secure-serving=false
+            # The EPP requires a bearer token on /metrics by default, and its
+            # metrics are the ONLY ground truth for whether the prefix index
+            # ever recorded a match — which is what makes a "no client-observable
+            # signal" verdict mean anything. Off here because this is a
+            # single-tenant kind cluster with no ingress to that port; a real
+            # deployment leaves it on (upstream's chart gates it the same way).
+            - --metrics-endpoint-auth=false
             - --grpc-health-port=9003
             - --v={{ if eq .Values.epp.logLevel "debug" }}4{{ else }}2{{ end }}
             {{- with .Values.epp.extraArgs }}

@@ -23,7 +23,7 @@ GIT = ("abc1234", False)
 pytestmark = pytest.mark.integration
 
 
-def _cells(trials: int = 4, concurrency: tuple[int, ...] = (1, 4)) -> list[Cell]:
+def _full_matrix(trials: int = 4, concurrency: tuple[int, ...] = (1, 4)) -> list[Cell]:
     return stage2_matrix(
         seed=1,
         model="Qwen/Qwen2.5-0.5B-Instruct",
@@ -32,6 +32,18 @@ def _cells(trials: int = 4, concurrency: tuple[int, ...] = (1, 4)) -> list[Cell]
         heterogeneity="uniform",
         trials=trials,
     )
+
+
+def _cells(trials: int = 4, concurrency: tuple[int, ...] = (1, 4)) -> list[Cell]:
+    """Only the invariance-off half of the matrix.
+
+    These tests are about resumability, not about the two-engine workflow. The
+    driver now refuses a cell whose batch_invariant contradicts the live engine,
+    so a mixed matrix cannot complete against one stub — which is correct, and
+    is asserted separately in
+    test_one_engine_cannot_complete_a_mixed_invariance_matrix.
+    """
+    return [c for c in _full_matrix(trials, concurrency) if not c.params.batch_invariant]
 
 
 def _spec() -> MatrixSpec:
@@ -50,12 +62,61 @@ def _execute(tmp_path: Path, stub_url: str, **kw: object) -> object:
     )
 
 
+def _execute_both_engines(tmp_path: Path, **stub_kw: object) -> object:
+    """Run a stage-2 matrix the only way it can honestly be run.
+
+    batch_invariant is an engine-wide env var read at import, so one engine
+    cannot serve both halves of the matrix. The driver now refuses cells that
+    contradict the live engine, which means a complete stage-2 run is two
+    passes over the same run-id — exactly what the GPU job does.
+    """
+    outcome = None
+    run_id = None
+    for invariant in (False, True):
+        with stub_engine(
+            StubConfig(batch_invariant=invariant, **stub_kw)  # type: ignore[arg-type]
+        ) as stub:
+            outcome = execute(
+                engine_url=stub.url,
+                cells=_full_matrix(),
+                results_root=tmp_path,
+                spec=_spec(),
+                command="test",
+                git=GIT,
+                run_id=run_id,
+            )
+            run_id = outcome.run_id
+    return outcome
+
+
 def test_run_completes_every_cell(tmp_path: Path) -> None:
-    with stub_engine(StubConfig(divergence_mode="none")) as stub:
-        outcome = _execute(tmp_path, stub.url)
+    """Two passes, one per engine configuration — see _execute_both_engines."""
+    outcome = _execute_both_engines(tmp_path, divergence_mode="none")
     assert outcome.cells_failed == 0  # type: ignore[attr-defined]
     assert outcome.cells_done == outcome.cells_total  # type: ignore[attr-defined]
     assert Ledger.in_dir(outcome.run_dir).is_complete()  # type: ignore[attr-defined]
+
+
+def test_one_engine_cannot_complete_a_mixed_invariance_matrix(tmp_path: Path) -> None:
+    """The guard, stated as the property it protects.
+
+    Before it existed, this run reported every cell done — including the ones
+    whose configuration the engine never had. Those receipts would have
+    asserted a batch_invariant setting that was never active, and nothing
+    downstream could have caught it.
+    """
+    with stub_engine(StubConfig(batch_invariant=False)) as stub:
+        outcome = execute(
+            engine_url=stub.url,
+            cells=_full_matrix(),
+            results_root=tmp_path,
+            spec=_spec(),
+            command="test",
+            git=GIT,
+        )
+    assert outcome.cells_done < outcome.cells_total
+    assert outcome.cells_failed == 0
+    assert not Ledger.in_dir(outcome.run_dir).is_complete()
 
 
 def test_raw_output_is_written_per_cell(tmp_path: Path) -> None:
@@ -200,7 +261,8 @@ def test_engine_failure_marks_the_cell_and_continues(tmp_path: Path) -> None:
 
 def test_stage_one_stops_early_once_divergence_appears(tmp_path: Path) -> None:
     """GPU minutes spent confirming a known effect are minutes not spent finding it."""
-    cells = _cells(trials=8, concurrency=(16,))
+    # Two cells minimum, or "stopped before the end" cannot be observed.
+    cells = _cells(trials=8, concurrency=(1, 16))
     with stub_engine(StubConfig(divergence_mode="random")) as stub:
         outcome = execute(
             engine_url=stub.url,
@@ -242,3 +304,69 @@ def test_run_cell_writes_trials_in_order(tmp_path: Path) -> None:
         json.loads(line) for line in (tmp_path / f"{cell.cell_id}.jsonl").read_text().splitlines()
     ]
     assert [r["trial"] for r in rows] == list(range(6))
+
+
+def test_a_cell_is_skipped_when_the_engine_contradicts_it() -> None:
+    """The guard that makes a two-engine stage 2 honest.
+
+    batch_invariant is an engine-wide env var read at import time, so it cannot
+    change without restarting vLLM. The driver attaches to one engine, so a
+    stage-2 matrix that varies it would otherwise run every cell against
+    whichever engine was up — and half the receipts would assert a configuration
+    that was never active. Nothing downstream could detect that.
+    """
+    from attest.harness.matrix import Cell, CellParams
+    from attest.harness.run import _engine_disagrees_with
+    from tests.support.stub_engine import StubConfig, stub_engine
+
+    def _cell(batch_invariant: bool) -> Cell:
+        return Cell(
+            cell_id="c0000",
+            params=CellParams(
+                model="Qwen/Qwen2.5-0.5B-Instruct",
+                max_tokens=8,
+                concurrency=1,
+                batch_invariant=batch_invariant,
+                length_heterogeneity="uniform",
+                arrival="burst",
+                trials=2,
+                seed=0,
+            ),
+        )
+
+    # Engine has invariance OFF.
+    with stub_engine(StubConfig(batch_invariant=False)) as stub:
+        assert _engine_disagrees_with(stub.url, _cell(False)) is None
+        reason = _engine_disagrees_with(stub.url, _cell(True))
+        assert reason is not None
+        assert "Refusing to measure" in reason
+
+    # And the mirror image, so the guard is not accidentally one-directional.
+    with stub_engine(StubConfig(batch_invariant=True)) as stub:
+        assert _engine_disagrees_with(stub.url, _cell(True)) is None
+        assert _engine_disagrees_with(stub.url, _cell(False)) is not None
+
+
+def test_an_unreachable_engine_does_not_silently_pass_the_guard() -> None:
+    """None means 'could not compare', not 'agrees'.
+
+    The distinction matters because the receipt records the readback state; an
+    unconfirmed value and a confirmed one must never be presented as the same.
+    """
+    from attest.harness.matrix import Cell, CellParams
+    from attest.harness.run import _engine_disagrees_with
+
+    cell = Cell(
+        cell_id="c0000",
+        params=CellParams(
+            model="m",
+            max_tokens=8,
+            concurrency=1,
+            batch_invariant=True,
+            length_heterogeneity="uniform",
+            arrival="burst",
+            trials=1,
+            seed=0,
+        ),
+    )
+    assert _engine_disagrees_with("http://127.0.0.1:1", cell) is None

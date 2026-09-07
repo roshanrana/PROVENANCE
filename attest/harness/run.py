@@ -120,6 +120,31 @@ def run_cell(engine_url: str, cell: Cell, run_dir: Path) -> list[dict[str, Any]]
     return records
 
 
+def _engine_disagrees_with(engine_url: str, cell: Cell) -> str | None:
+    """Does the live engine contradict what this cell claims to be measuring?
+
+    Returns a reason when the engine's readback disagrees with the cell's
+    ``batch_invariant``, or None when they agree or the engine exposes nothing
+    usable. An unreadable engine is NOT treated as agreement in the writeup —
+    the receipt records the readback state, and an unconfirmed value and a
+    confirmed one must never be presented as the same thing (D-08).
+    """
+    try:
+        with EngineClient(engine_url) as engine:
+            state = engine.resolved_state()
+    except EngineError:
+        return None  # nothing to compare against; the cell's own receipt says so
+    if state.deterministic != cell.params.batch_invariant:
+        return (
+            f"cell wants batch_invariant={cell.params.batch_invariant} but the engine "
+            f"reports deterministic={state.deterministic}. Refusing to measure: "
+            f"batch invariance is an engine-wide env var read at import, so it cannot "
+            f"change without a restart, and running this cell here would label the "
+            f"result with a configuration that was never active."
+        )
+    return None
+
+
 def execute(
     *,
     engine_url: str,
@@ -168,6 +193,26 @@ def execute(
             continue  # done stays done; failed is never retried into the dataset
         cell = by_id.get(record.cell_id)
         if cell is None:
+            continue
+
+        # The driver attaches to ONE engine, but a stage-2 matrix varies
+        # batch_invariant — which is an engine-wide environment variable read at
+        # import time, so it cannot change without restarting the process. Left
+        # unchecked, every cell would run against whichever engine happened to
+        # be up and half of them would carry the wrong label: a receipt asserting
+        # deterministic=True for a run that never enabled the invariant kernels.
+        #
+        # That is the exact failure D-08 exists to prevent, one level up, and
+        # nothing downstream could detect it. So a cell whose configuration
+        # disagrees with the live engine is SKIPPED, loudly, and left pending —
+        # a second pass with the other engine and --resume picks it up.
+        # The cell is left PENDING rather than marked failed: it has not been
+        # attempted, and a resume pass against the right engine must still run
+        # it. Adding a SKIPPED state would change the ledger's frozen contract
+        # for something a printed line records just as well.
+        mismatch = _engine_disagrees_with(engine_url, cell)
+        if mismatch is not None:
+            print(f"SKIP {cell.cell_id}: {mismatch}", file=sys.stderr)
             continue
 
         ledger.mark_running(cell.cell_id)

@@ -838,3 +838,43 @@ probes, which is the reason for the strict guard rather than a lenient one.
 
 Read run #14. Two numbers decide whether BARRIER is finished:
 `default` AUC and `hardened` AUC on the same schedule.
+
+---
+
+## Finding F-27 — route-level header mutations are invisible to ext_proc
+
+Run #14 (`c67ad36`). FR-B-03 failed on both profiles' hardened job with:
+
+```
+FR-B-03 FAILED: gateway answered 500 for a tenant request
+epp: "tenant-salt: no authenticated tenant identity"
+```
+
+A 500 from the EPP rather than a 401 from Envoy, so the caller *was*
+authenticated — and then the plugin found no identity to salt with.
+
+**Cause.** Envoy applies route-level `request_headers_to_add` /
+`request_headers_to_remove` in the **router filter**, at the end of the HTTP
+filter chain. `ext_proc` runs before it. So the EPP read the request exactly as
+the client sent it, and every route-level mutation was invisible to the thing it
+exists to protect.
+
+**Why run #13 reported the opposite.** The S-02 spike sets `x-llmd-tenant` on its
+own requests. The plugin saw an identity on every probe and was satisfied — with
+the **client-supplied** value. That is the forgery vector ADR-006 exists to
+close, running inside a profile labelled `hardened`, while the writeup called it
+a passing trust boundary. `bench/results/hardened-run13-2026-09-07.md` now
+carries the correction, appended rather than substituted.
+
+**Fix.** `envoy.filters.http.header_mutation` as a real HTTP filter placed
+**before** `ext_proc`, with the remove-and-overwrite as per-route config. A
+filter's per-route mutations run at that filter's position in the chain.
+
+**What caught it.** An instrument that deliberately withholds the thing under
+test: FR-B-03 sends no identity header, so nothing but the proxy could have
+supplied one. The S-02 spike could not have found this at any sample size,
+because it always supplied the header itself.
+
+**Run #14 also validated the FR-B-03 guards.** The measurement refused to run
+rather than recording a broken cluster as a mitigation — which is exactly the
+behaviour `test_a_non_200_from_the_gateway_is_not_silently_measured` asserts.

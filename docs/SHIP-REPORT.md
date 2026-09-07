@@ -23,7 +23,8 @@ produced it.
 | `cache_salt` exists upstream and is unenforced | vLLM + llm-d source | **Verified by source read** |
 | SGLang has the same unenforced gap, and `extra_key` is the wrong field | `sgl-project/sglang@30705c0` | **Verified by source read** |
 | The tenant-salt plugin closes the routing-index channel | 22 Go tests against real llm-d | **Compiles, passes, and now runs in a live cluster — but its *effect* is unmeasured** |
-| The hardened trust boundary works | Run #13: 401 unauthenticated, 404 probes served through a fail-closed plugin | **Measured** |
+| The proxy refuses unauthenticated callers | Run #13: `gateway answered: 401` | **Measured** |
+| The proxy's injected identity reaches the plugin | — | **Claimed in run #13 and WITHDRAWN. Route-level header mutations are invisible to ext_proc (F-27); the EPP was reading the client's own header.** |
 | No client-observable routing oracle exists on the simulator | ADR-011, CI run #12, n=402 | **Measured, with a positive control** |
 | A routing-index leak exists to instrument | EPP prefix index: 402 of 404 lookups matched | **Measured** |
 | The attack works against a client | — | **Not established, and ADR-011 says why: it rescopes to FR-B-09 on real vLLM.** |
@@ -51,13 +52,17 @@ to publish only its successes.
 | 11 | The EPP config had no `apiVersion`/`kind`, named `least-queue-filter` (which does not exist upstream), declared none of its `pluginRef`s, and listed a requestcontrol plugin as a scheduling one | Reading llm-d's own shipped configs |
 | 12 | **S-02 returned ORACLE VIABLE on a millisecond counter**, twice — the refutation was three lines above it in the same output both times | Reading the run rather than the verdict |
 | 13 | The ground-truth gate died on a 401 and reported nothing; then passed on a plugin-duration histogram that proved nothing | The gate's own output making no sense |
+| 14 | **Route-level identity injection never reached the EPP** — Envoy applies route header mutations in the router filter, after ext_proc — so the "hardened" profile was reading a client-supplied identity, the exact forgery ADR-006 exists to close | An instrument that deliberately withholds the header under test |
 
-**Twelve of the thirteen were caught before or by a number that made no sense.**
+**Thirteen of the fourteen were caught before or by a number that made no sense.**
 The one that reached a published claim (#6/#7) was amended in place, with the
 wrong run left in `bench/results/` and explained.
 
-**Three of them — #6, and both halves of #13 — were guards that contained the
-defect they were written to catch.** That is the single most useful pattern this
+**Four of them — #6, both halves of #13, and #14 — were guards or reports that
+contained the defect they were written to catch.** #14 is the sharpest: run #13's
+writeup reported a passing trust boundary from a true observation (404 probes
+served) and an inference that skipped one possibility (that the *client* supplied
+the header). The correction is appended to that writeup rather than replacing it. That is the single most useful pattern this
 project has surfaced about its own methods, and it is why the S-02 ground-truth
 check ended up as tested code rather than a shell one-liner.
 

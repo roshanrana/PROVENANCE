@@ -58,19 +58,26 @@ data:
                           routes:
                             {{- if .Values.proxy.injectIdentityHeader }}
                             {{/*
-                              ADR-006, and the half of the mitigation that was
-                              declared in values-hardened.yaml and read by no
-                              template until now. One route per tenant, matched
-                              on the API key the proxy issued. The identity
-                              header is OVERWRITTEN rather than removed-then-
-                              added: Envoy applies request_headers_to_remove
-                              after request_headers_to_add, so a strip rule here
-                              would delete the proxy's own injection. Overwrite
-                              is one operation with no ordering to get wrong.
+                              ADR-006. One route per tenant, matched on the API
+                              key the proxy issued.
 
-                              Without this the EPP reads x-llmd-tenant straight
-                              from the client, and the mitigation is forgeable by
-                              anyone who can set a header.
+                              The mutation is a `header_mutation` PER-FILTER
+                              config, NOT route-level `request_headers_to_add`.
+                              That distinction is the whole of F-27 and it is not
+                              a style preference: **route-level header mutations
+                              are applied by the ROUTER filter, at the end of the
+                              chain, so ext_proc never sees them.** The EPP was
+                              therefore reading whatever the client sent, and run
+                              #13 looked fine only because the S-02 client sends
+                              `x-llmd-tenant` itself. A client that omits it got
+                              `tenant-salt: no authenticated tenant identity` and
+                              a 500 — which is fail-closed working, on an
+                              injection that had never worked.
+
+                              `header_mutation` is an ordinary HTTP filter, so
+                              its per-route mutations run at ITS position in the
+                              chain. Placed before ext_proc below, they are
+                              exactly what the EPP reads.
                             */}}
                             {{- $strip := without .Values.proxy.stripInboundHeaders .Values.proxy.injectIdentityHeader }}
                             {{- range .Values.tenants }}
@@ -80,21 +87,21 @@ data:
                                   - name: authorization
                                     string_match:
                                       exact: "Bearer __KEY_{{ .name | upper | replace "-" "_" }}__"
-                              {{- with $strip }}
-                              # Every other header the profile distrusts. The
-                              # injected identity is excluded from this list
-                              # because Envoy removes after it adds, so leaving
-                              # it here would strip the proxy's own vouching.
-                              request_headers_to_remove:
-                              {{- range . }}
-                                - {{ . }}
-                              {{- end }}
-                              {{- end }}
-                              request_headers_to_add:
-                                - header:
-                                    key: {{ $.Values.proxy.injectIdentityHeader }}
-                                    value: {{ .name }}
-                                  append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                              typed_per_filter_config:
+                                envoy.filters.http.header_mutation:
+                                  "@type": type.googleapis.com/envoy.extensions.filters.http.header_mutation.v3.HeaderMutationPerRoute
+                                  mutations:
+                                    request_mutations:
+                                      {{- range $strip }}
+                                      # Distrusted inbound headers, dropped
+                                      # before the EPP is asked anything.
+                                      - remove: {{ . }}
+                                      {{- end }}
+                                      - append:
+                                          header:
+                                            key: {{ $.Values.proxy.injectIdentityHeader }}
+                                            value: {{ .name }}
+                                          append_action: OVERWRITE_IF_EXISTS_OR_ADD
                               route:
                                 cluster: original_destination_cluster
                                 timeout: 300s
@@ -132,6 +139,16 @@ data:
                                 idle_timeout: 300s
                             {{- end }}
                     http_filters:
+                      {{- if .Values.proxy.injectIdentityHeader }}
+                      # FIRST, and that placement is the mitigation. A filter's
+                      # per-route mutations run at the filter's own position, so
+                      # everything ext_proc reads below has already had the
+                      # client's identity claim removed and the proxy's own
+                      # substituted (F-27).
+                      - name: envoy.filters.http.header_mutation
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.header_mutation.v3.HeaderMutation
+                      {{- end }}
                       - name: envoy.filters.http.ext_proc
                         typed_config:
                           "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor

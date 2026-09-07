@@ -186,6 +186,29 @@ jobs:
           uv run python -m barrier.attack.ground_truth \
             bench/results/epp-ground-truth/metrics.txt
 
+      # FR-B-03, the one measurement this project has promised since its
+      # requirements were written. Runs AFTER the ground-truth step, which
+      # leaves the 9090 port-forward up, and after S-02 so the index is warm.
+      #
+      # It reads the prefix index one request at a time: tenant B plants a fresh
+      # prefix, tenant A probes it, tenant A controls with a prefix nobody
+      # planted. Run #13 showed why the aggregate cannot do this — the S-02
+      # schedule buries the single cross-tenant event in 403 same-tenant repeats.
+      #
+      # The verdict is profile-dependent and both halves are required: `default`
+      # must clear the pre-registered bar for the attack to be established, and
+      # `hardened` must straddle chance for the mitigation to be. Neither means
+      # anything without the other, which is why the matrix runs both.
+      - name: FR-B-03 — the cross-tenant leak, per request
+        run: |
+          set -euo pipefail
+          uv run python -m barrier.attack.demo_frb03 \
+            --gateway http://localhost:8080 \
+            --metrics http://localhost:9090/metrics \
+            --profile "${{ matrix.profile }}" --trials 40 \
+            --key-a "$(cat .secrets/tenant-keys/tenant-a)" \
+            --key-b "$(cat .secrets/tenant-keys/tenant-b)"
+
       - name: Collect cluster state on failure
         if: failure()
         run: |

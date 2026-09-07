@@ -795,3 +795,46 @@ The pre-registered rule already covers it: the attack succeeds if `default`
 clears the bar, the mitigation succeeds if `hardened` straddles chance. **Both
 halves are required and neither exists.** Everything else in the repository is
 measured or explicitly scoped out.
+
+---
+
+## FR-B-03 built — the cross-tenant leak, measured one request at a time
+
+`barrier/attack/demo_frb03.py`, nine tests. Runs in CI for both profiles.
+
+**The instrument.** `prefix_indexer_hit_ratio` is a histogram, so around a single
+request `(sum_after − sum_before) / (count_after − count_before)` is *that
+request's own* match ratio. The module **refuses** to record a trial where the
+count moved by anything other than one: another client, a retry, or a request
+that maps to several lookups would each corrupt the attribution silently, and a
+corrupted attribution here would be published as a security result.
+
+**The schedule**, fresh nonce per trial so nothing can hit an earlier trial:
+
+1. tenant B plants `<nonce> <filler>`;
+2. tenant A probes the same text — **positive class**;
+3. tenant A probes a different fresh nonce nobody planted — **negative class**.
+
+Both classes are tenant A, same key, same length, back to back. The only
+difference is whether another tenant put that text in the index.
+
+**The verdict** is `common.stats.decision.decide` — the same NFR-05 rule,
+untouched. Profile-dependent, and **both halves are required**: `default` must
+clear the bar for the attack to be established, `hardened` must straddle chance
+for the mitigation to be. A default-only result shows a leak nobody closed; a
+hardened-only result is indistinguishable from a broken cluster.
+
+**Guards that exist because of what this session found.** A non-200 from the
+gateway raises rather than being recorded as "no match" — otherwise a bad
+credential would present as a perfect mitigation. An absent metric family raises
+rather than reading as zero. Both are tested.
+
+**Unverified against a real cluster.** The tests run against a fake index. The
+open question the first real run answers is whether one HTTP request really is
+exactly one index lookup; runs #12 and #13 both showed 404 lookups for 404
+probes, which is the reason for the strict guard rather than a lenient one.
+
+## Next
+
+Read run #14. Two numbers decide whether BARRIER is finished:
+`default` AUC and `hardened` AUC on the same schedule.

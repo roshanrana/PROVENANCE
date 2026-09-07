@@ -49,6 +49,11 @@ class GroundTruth:
     lookups: int
     matched_nothing: int
     index_size: float | None
+    #: The histogram's `_sum` — total matched ratio across all lookups. Useless
+    #: as an aggregate (see run #13) but the numerator of the per-request
+    #: attribution FR-B-03 is built on: sum-delta over count-delta around a
+    #: single request is that request's own match ratio.
+    ratio_sum: float = 0.0
     #: Which metric family these counts came from, so the number in the log can
     #: be checked against the dump. Reported per family rather than summed: the
     #: two published families are the SAME observations under two names, and a
@@ -110,6 +115,7 @@ def read_ground_truth(text: str) -> GroundTruth:
     """
     lookups: dict[str, float] = {}
     matched_nothing: dict[str, float] = {}
+    ratio_sum: dict[str, float] = {}
     index_size: float | None = None
 
     for name, labels, value in _parse_samples(text):
@@ -118,6 +124,9 @@ def read_ground_truth(text: str) -> GroundTruth:
         elif name.endswith(f"{HIT_RATIO_SUFFIX}_count"):
             family = name[: -len("_count")]
             lookups[family] = lookups.get(family, 0.0) + value
+        elif name.endswith(f"{HIT_RATIO_SUFFIX}_sum"):
+            family = name[: -len("_sum")]
+            ratio_sum[family] = ratio_sum.get(family, 0.0) + value
         elif name.endswith(f"{HIT_RATIO_SUFFIX}_bucket"):
             le = _LE.search(labels)
             # The zero bucket, however Prometheus chose to format it.
@@ -133,6 +142,7 @@ def read_ground_truth(text: str) -> GroundTruth:
         lookups=int(lookups[family]),
         matched_nothing=int(matched_nothing.get(family, 0.0)),
         index_size=index_size,
+        ratio_sum=ratio_sum.get(family, 0.0),
         family=family,
     )
 

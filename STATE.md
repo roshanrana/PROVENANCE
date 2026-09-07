@@ -509,3 +509,38 @@ F-18, F-20 and F-21 are **fixed, by evidence rather than by argument**:
 no template. Until they are, the hardened profile reads a client-controlled
 identity header, and the mitigation is forgeable at the edge. `stripInboundHeaders`
 is wired; the injection half is not.
+
+---
+
+## Finding F-23 — S-02 returned ORACLE VIABLE on a millisecond counter
+
+Found 2026-09-07 from BARRIER CI run #6 (`86dbc86`) — the first green run, and
+the first time the spike executed at all. Full writeup:
+`bench/results/s02-run6-2026-09-07.md`, kept including the wrong verdict.
+
+The single discriminator it found was `x-envoy-upstream-service-time`: Envoy's
+per-request upstream latency in milliseconds, which differs between any two
+probes whatever the cache state. The refutation was three lines above it in the
+same output — hit median 214.8 ms against miss median 214.5 ms, on a simulator
+that by construction does not vary TTFT on cache hit versus miss (D-01).
+
+**Cause.** `find_discriminators` implemented "fields that differ" behind a
+five-name ignore-list, while its docstring promised "fields that differ for
+reasons related to routing". An ignore-list only excludes the noise you already
+named. Replaced with a property test: a field counts only if it differs in
+*every* pair (consistent) and does not take a fresh value on every probe on both
+sides (classifying). Rejected candidates are now published with their reason.
+
+**This is a defect fix, not a change to the decision rule.** LLD §7 is untouched.
+
+**Second time this shape has appeared**, after ship-report defect #6. Both times
+the refuting evidence was already in the output and nothing external was needed.
+
+**S-02's verdict is still unrecorded.** It does not reach `decisions.md`, and no
+oracle code is written, until a run under the corrected rule returns one.
+
+### What run #6 did establish
+
+The topology works end to end: EPP 1/1 with ext-proc on 9002, gateway 1/1 with
+all Envoy clusters initialized, both simulators Ready, 24 probes answered. F-18,
+F-20, F-21 and F-22 are closed by a run rather than by an argument.

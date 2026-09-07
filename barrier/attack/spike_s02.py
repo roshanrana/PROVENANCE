@@ -78,6 +78,10 @@ class SpikeResult:
     probes: list[Probe] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     discriminators: list[str] = field(default_factory=list)
+    # Every field that differed but was NOT counted, with the reason. Published
+    # because "we looked and rejected it" and "we never looked" are different
+    # claims, and only one of them is checkable.
+    rejected: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -85,6 +89,7 @@ class SpikeResult:
             "probes": [p.to_dict() for p in self.probes],
             "notes": self.notes,
             "client_observable_discriminators": self.discriminators,
+            "rejected_candidates": self.rejected,
             "verdict": self.verdict(),
         }
 
@@ -128,21 +133,76 @@ def probe_once(
     )
 
 
-def find_discriminators(pairs: list[tuple[Probe, Probe]]) -> list[str]:
-    """Fields that differ between a cache-hit probe and a cache-miss probe.
+# A field observed in fewer pairs than this cannot be told apart from noise: one
+# observation of "these two differ" is consistent with both a perfect oracle and
+# a millisecond counter. Below the threshold the field is kept, and the caller is
+# expected to run enough repeats that the threshold is reached.
+MIN_PAIRS_TO_JUDGE_VARIABILITY = 3
 
-    Ignores fields that vary for reasons unrelated to routing — a per-request id
-    or a timestamp differs on every call and discriminates nothing.
+
+def find_discriminators(
+    pairs: list[tuple[Probe, Probe]], rejected: dict[str, str] | None = None
+) -> list[str]:
+    """Fields that CLASSIFY a cache hit against a cache miss.
+
+    Not "fields that differ" — that was the earlier implementation and it was
+    wrong in a way that mattered. CI run #6 returned ORACLE VIABLE on
+    ``x-envoy-upstream-service-time``, Envoy's per-request upstream latency in
+    milliseconds. Two requests essentially never take the same number of
+    milliseconds, so that header differs between *any* two probes and
+    discriminates nothing. The same run recorded hit median 214.8 ms against
+    miss median 214.5 ms on a simulator that by construction does not vary TTFT
+    on cache hit versus miss (D-01) — so the timing carried no signal while the
+    header derived from it was being counted as one.
+
+    An ignore-list cannot fix that; it only names the noise you already thought
+    of. So the test is now the one the docstring always claimed:
+
+    * **consistent** — it differs in *every* pair, not merely some. A real
+      oracle does not classify correctly nine times out of eleven.
+    * **classifying** — its value is a property of the class, not of the
+      request. A field that takes a fresh value on every single probe, on both
+      sides, is measuring the request.
+
+    This is a defect fix, not a change to the decision rule. LLD §7 fixes what
+    the *verdict* means; it never said a differing field is a signal, and this
+    function's own docstring already promised to exclude fields that "vary for
+    reasons unrelated to routing".
     """
     ignore = {"date", "content-length", "x-request-id", "server", "connection"}
-    found: set[str] = set()
+    if rejected is None:
+        rejected = {}
 
+    observed: dict[str, list[tuple[str | None, str | None]]] = {}
     for hit, miss in pairs:
         for key in set(hit.headers) | set(miss.headers):
             if key in ignore:
                 continue
-            if hit.headers.get(key) != miss.headers.get(key):
-                found.add(f"header:{key}")
+            observed.setdefault(key, []).append((hit.headers.get(key), miss.headers.get(key)))
+
+    found: set[str] = set()
+    for key, obs in observed.items():
+        differing = sum(1 for h, m in obs if h != m)
+        if differing == 0:
+            continue
+        if differing != len(obs):
+            rejected[f"header:{key}"] = (
+                f"differs in only {differing} of {len(obs)} hit/miss pairs; an oracle "
+                "that classifies correctly only sometimes is not an oracle"
+            )
+            continue
+        if len(obs) >= MIN_PAIRS_TO_JUDGE_VARIABILITY:
+            hits = [h for h, _ in obs]
+            misses = [m for _, m in obs]
+            if len(set(hits)) == len(hits) and len(set(misses)) == len(misses):
+                rejected[f"header:{key}"] = (
+                    f"a fresh value on every one of {len(obs)} probes on both sides; it "
+                    "measures the request, not the cache state"
+                )
+                continue
+        found.add(f"header:{key}")
+
+    for hit, miss in pairs:
         if hit.body_keys != miss.body_keys:
             found.add("body:key-set")
     return sorted(found)
@@ -186,7 +246,7 @@ def run_spike(gateway: str, key_a: str, key_b: str, repeats: int, out_dir: Path)
             result.probes += [hit, miss]
             pairs.append((hit, miss))
 
-    result.discriminators = find_discriminators(pairs)
+    result.discriminators = find_discriminators(pairs, result.rejected)
 
     hit_times = [p.elapsed_ms for p in result.probes if "hit" in p.label]
     miss_times = [p.elapsed_ms for p in result.probes if "miss" in p.label]
@@ -231,6 +291,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"probes: {len(result.probes)}")
     for note in result.notes:
         print(f"  note: {note}")
+    for name, reason in sorted(result.rejected.items()):
+        print(f"  rejected: {name} — {reason}")
     print(f"\nclient-observable discriminators: {result.discriminators or 'NONE'}")
     print(f"\nVERDICT: {result.verdict()}")
     print(f"\n{DECISION_RULE}")

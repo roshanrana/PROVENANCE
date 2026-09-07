@@ -95,3 +95,47 @@ def test_probe_records_the_prompt_by_hash_not_verbatim() -> None:
     doc = _probe("hit", {}).to_dict()
     assert "prompt" not in doc
     assert len(doc["prompt_sha"]) == 16
+
+
+# ------------------------------------------------------- run #6's false positive
+
+
+def test_a_per_request_timer_is_not_a_discriminator() -> None:
+    """CI run #6 returned ORACLE VIABLE on `x-envoy-upstream-service-time`.
+
+    Envoy's upstream latency in milliseconds takes a fresh value on essentially
+    every request, so it differs between *any* two probes. Counting it declared
+    an oracle viable on a simulator that does not vary TTFT on cache hit versus
+    miss at all — the wrong verdict on the one question BARRIER's shape turns on.
+    """
+    pairs = [
+        (
+            _probe(f"h{i}", {"x-envoy-upstream-service-time": str(210 + i)}),
+            _probe(f"m{i}", {"x-envoy-upstream-service-time": str(310 + i)}),
+        )
+        for i in range(6)
+    ]
+    rejected: dict[str, str] = {}
+    assert find_discriminators(pairs, rejected) == []
+    assert "measures the request" in rejected["header:x-envoy-upstream-service-time"]
+
+
+def test_a_stable_routing_header_survives_the_same_number_of_pairs() -> None:
+    """The control for the test above: a real signal repeats within its class."""
+    pairs = [
+        (_probe(f"h{i}", {"x-served-by": "pod-1"}), _probe(f"m{i}", {"x-served-by": "pod-2"}))
+        for i in range(6)
+    ]
+    assert find_discriminators(pairs) == ["header:x-served-by"]
+
+
+def test_a_field_that_differs_only_sometimes_is_rejected() -> None:
+    """An oracle that classifies correctly two times in three is not an oracle."""
+    pairs = [
+        (_probe("h1", {"x-a": "1"}), _probe("m1", {"x-a": "2"})),
+        (_probe("h2", {"x-a": "1"}), _probe("m2", {"x-a": "2"})),
+        (_probe("h3", {"x-a": "1"}), _probe("m3", {"x-a": "1"})),
+    ]
+    rejected: dict[str, str] = {}
+    assert find_discriminators(pairs, rejected) == []
+    assert "2 of 3" in rejected["header:x-a"]

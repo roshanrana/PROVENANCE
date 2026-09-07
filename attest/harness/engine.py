@@ -125,6 +125,12 @@ class EngineClient:
             "top_p": sampling.top_p,
             "max_tokens": sampling.max_tokens,
             "logprobs": 1,
+            # Token ids are the receipt's subject — subject_digest() is computed
+            # over them — but vLLM declares CompletionResponseChoice.token_ids as
+            # `list[int] | None = None` and populates it ONLY for a request that
+            # opts in. Omitting this flag does not fail loudly; it yields a choice
+            # with token_ids null, and the receipt would have nothing to bind.
+            "return_token_ids": True,
         }
         if cache_salt is not None:
             body["cache_salt"] = cache_salt
@@ -140,10 +146,47 @@ class EngineClient:
 
         try:
             choice = payload["choices"][0]
-            return Completion(
-                token_ids=[int(t) for t in choice["token_ids"]],
-                text=choice["text"],
-                logprobs=[float(x) for x in choice["logprobs"]["token_logprobs"]],
-            )
         except (KeyError, IndexError, TypeError) as exc:
+            raise EngineError(f"unusable completion payload: {exc}") from exc
+
+        token_ids = choice.get("token_ids")
+        if not token_ids:
+            # Named precisely, because the generic message sent an operator
+            # hunting a corrupt response when the real cause is a server that
+            # ignored `return_token_ids` — an older vLLM, or a proxy stripping
+            # unrecognised fields.
+            raise EngineError(
+                "engine returned no token_ids. The request set return_token_ids=true, "
+                "so this engine either predates that option or something between us "
+                "dropped it. Refusing to continue: the receipt's subject digest is "
+                "computed over token ids, and there is nothing to bind."
+            )
+
+        raw_logprobs = (choice.get("logprobs") or {}).get("token_logprobs")
+        if raw_logprobs is None:
+            raise EngineError(
+                "engine returned no token_logprobs. Bitwise reproducibility (FR-A-03) "
+                "is claimed over the logprob vector, so a completion without one "
+                "cannot support the claim."
+            )
+        # vLLM types this `list[float | None]` and emits None wherever a token had
+        # no top-logprob entry. Coercing that to 0.0 would fabricate a value and
+        # make two genuinely different runs digest identically; dropping it would
+        # silently shorten the vector. Neither is acceptable for the one number
+        # the whole project rests on, so refuse and say where.
+        holes = [i for i, x in enumerate(raw_logprobs) if x is None]
+        if holes:
+            raise EngineError(
+                f"engine returned null logprobs at positions {holes[:8]}"
+                f"{' …' if len(holes) > 8 else ''} of {len(raw_logprobs)}. "
+                "A digest over a vector with holes is not evidence of bitwise identity."
+            )
+
+        try:
+            return Completion(
+                token_ids=[int(t) for t in token_ids],
+                text=choice["text"],
+                logprobs=[float(x) for x in raw_logprobs],
+            )
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise EngineError(f"unusable completion payload: {exc}") from exc

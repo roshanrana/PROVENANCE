@@ -182,20 +182,33 @@ class _Handler(BaseHTTPRequestHandler):
             # divergent completion also has divergent logprobs — as on real
             # hardware, where the bits differ before the text does.
             logprobs = [-round(0.001 * t, 6) for t in token_ids]
+            # The stub enforces the real contract rather than being agreeable.
+            #
+            # vLLM's CompletionResponseChoice declares `token_ids: list[int] |
+            # None = None`, populated ONLY when the request sets
+            # `return_token_ids: true`. A stub that always returned token ids
+            # would agree with any caller — including one that never asks for
+            # them — and the disagreement would surface for the first time on
+            # rented hardware. So: no flag, no token ids, exactly as upstream.
+            choice: dict[str, Any] = {
+                "index": 0,
+                "text": " ".join(f"t{t}" for t in token_ids),
+                "logprobs": {
+                    "token_logprobs": logprobs,
+                    "tokens": [f"t{t}" for t in token_ids],
+                    "text_offset": [0] * len(token_ids),
+                    "top_logprobs": [None] * len(token_ids),
+                },
+                "finish_reason": "length",
+            }
+            if body.get("return_token_ids"):
+                choice["token_ids"] = token_ids
             self._send(
                 200,
                 {
                     "id": f"cmpl-{state.requests:06d}",
                     "model": body.get("model", MODEL_ID),
-                    "choices": [
-                        {
-                            "index": 0,
-                            "text": " ".join(f"t{t}" for t in token_ids),
-                            "token_ids": token_ids,
-                            "logprobs": {"token_logprobs": logprobs},
-                            "finish_reason": "length",
-                        }
-                    ],
+                    "choices": [choice],
                     "_stub": {"bucket": bucket, "cache_salt": body.get("cache_salt")},
                 },
             )

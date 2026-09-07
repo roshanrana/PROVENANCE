@@ -153,3 +153,82 @@ def test_engine_client_reports_unusable_payloads(tmp_path: Path) -> None:
             engine._get("/definitely-not-here")
         sampling = SamplingParams(seed=0, temperature=0.0, top_p=1.0, max_tokens=4)
         assert len(engine.complete("x", sampling).token_ids) == 4
+
+
+# ----------------------------------------------------- the real vLLM contract
+
+
+def test_the_request_opts_in_to_token_ids() -> None:
+    """vLLM omits token_ids unless the request asks for them.
+
+    ``CompletionResponseChoice.token_ids`` is declared ``list[int] | None =
+    None`` and is populated only when ``return_token_ids`` is set. Since the
+    receipt's subject digest is computed over token ids, a request without the
+    flag would produce a receipt with nothing to bind — and the stub used to
+    hide that by always returning them.
+    """
+    import httpx
+
+    from tests.support.stub_engine import stub_engine
+
+    with stub_engine() as stub:
+        without = httpx.post(
+            f"{stub.url}/v1/completions",
+            json={"prompt": "hi", "seed": 0, "max_tokens": 4},
+            timeout=10,
+        ).json()
+        assert "token_ids" not in without["choices"][0]
+
+        with EngineClient(stub.url) as client:
+            completion = client.complete("hi", SamplingParams(0, 0.0, 1.0, 4))
+        assert len(completion.token_ids) == 4
+
+
+def test_a_response_without_token_ids_is_refused_by_name() -> None:
+    """The diagnostic has to name the cause.
+
+    'unusable completion payload: token_ids' sends an operator hunting a corrupt
+    response, when the real cause is a server that ignored the opt-in.
+    """
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"choices": [{"text": "hi", "logprobs": {"token_logprobs": [-0.1]}}]},
+        )
+
+    client = EngineClient("http://engine")
+    client._client = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(EngineError, match="return_token_ids"):
+        client.complete("hi", SamplingParams(0, 0.0, 1.0, 4))
+
+
+def test_null_logprobs_are_refused_rather_than_coerced() -> None:
+    """vLLM types token_logprobs as ``list[float | None]`` and emits None
+    wherever a token had no top-logprob entry.
+
+    Coercing that to 0.0 would fabricate a value and make two genuinely
+    different runs digest identically — a false reproducibility result, which is
+    the worst outcome this project has available to it.
+    """
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "text": "hi",
+                        "token_ids": [1, 2, 3],
+                        "logprobs": {"token_logprobs": [-0.1, None, -0.3]},
+                    }
+                ]
+            },
+        )
+
+    client = EngineClient("http://engine")
+    client._client = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(EngineError, match=r"null logprobs at positions \[1\]"):
+        client.complete("hi", SamplingParams(0, 0.0, 1.0, 3))

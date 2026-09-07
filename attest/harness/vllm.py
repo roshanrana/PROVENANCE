@@ -103,6 +103,16 @@ class VllmConfig:
         # a run that quietly enabled it would produce a receipt asserting
         # something false.
         env.setdefault("VLLM_USE_V1", "1")
+        # /server_info is registered only under VLLM_SERVER_DEV_MODE (upstream
+        # `register_vllm_dev_api_routers`). Without it the endpoint 404s, the
+        # readback degrades to "engine exposed no server_info", and the receipt
+        # records what we asked for instead of what the engine resolved — a
+        # silent D-08 violation in a receipt that still looks well-formed.
+        #
+        # vLLM logs a security warning when this is on. That is correct and worth
+        # repeating: these engines are single-tenant, local, and torn down after
+        # the run. Do not enable it on anything serving real traffic.
+        env["VLLM_SERVER_DEV_MODE"] = "1"
         env.update(self.extra_env)
         return env
 
@@ -150,10 +160,16 @@ def read_resolved_state(
     http = client or httpx.Client(timeout=30.0)
     try:
         version = http.get(f"{base_url}/version").json()
-        # vLLM exposes its resolved engine arguments here; fields have moved
-        # between releases, so we read defensively and record what we find.
+        # The path is `/server_info`, NOT `/v1/server_info`: upstream's router is
+        # attached with `app.include_router(router)` and carries no prefix. It is
+        # also registered only under VLLM_SERVER_DEV_MODE, which VllmConfig.
+        # environment() sets — without it this 404s and the readback degrades.
+        #
+        # `config_format=json` matters: the default is "text", which returns
+        # `vllm_config` as one `str(VllmConfig)` blob that nothing can be read
+        # out of programmatically.
         try:
-            response = http.get(f"{base_url}/v1/server_info")
+            response = http.get(f"{base_url}/server_info", params={"config_format": "json"})
             response.raise_for_status()
             resolved: dict[str, Any] = response.json()
         except (httpx.HTTPError, ValueError):
@@ -172,32 +188,66 @@ def read_resolved_state(
             "number from this engine would carry the wrong label."
         )
 
+    vllm_config = _as_mapping(resolved.get("vllm_config"))
+    cache = _as_mapping(vllm_config.get("cache_config"))
+    parallel = _as_mapping(vllm_config.get("parallel_config"))
+
     return EngineState.for_engine(
         "vllm",
         deterministic=config.batch_invariant if observed_invariant is None else observed_invariant,
         engine_version=str(version.get("version", "unknown")),
-        engine_git_sha=str(version.get("git_sha", resolved.get("vllm_commit", "unknown"))),
+        engine_git_sha=str(version.get("git_sha", "unknown")),
         resolved_config=resolved or {"note": "engine exposed no server_info endpoint"},
         attention_backend=str(
-            resolved.get("attention_backend") or os.environ.get("VLLM_ATTENTION_BACKEND", "unknown")
+            _vllm_env(resolved).get("VLLM_ATTENTION_BACKEND")
+            or os.environ.get("VLLM_ATTENTION_BACKEND", "unknown")
         ),
-        prefix_caching=bool(resolved.get("enable_prefix_caching", config.enable_prefix_caching)),
-        speculative_decoding=bool(resolved.get("speculative_config") or False),
-        tensor_parallel_size=int(resolved.get("tensor_parallel_size", config.tensor_parallel_size)),
+        prefix_caching=bool(cache.get("enable_prefix_caching", config.enable_prefix_caching)),
+        speculative_decoding=bool(vllm_config.get("speculative_config") or False),
+        tensor_parallel_size=int(parallel.get("tensor_parallel_size", config.tensor_parallel_size)),
     )
+
+
+def _as_mapping(value: Any) -> Mapping[str, Any]:
+    """`vllm_config` is a JSON object only under ``config_format=json``.
+
+    Under the default "text" format it is a string, and indexing it would raise
+    somewhere far from the cause. Returning an empty mapping keeps the readback
+    honestly degraded instead.
+    """
+    return value if isinstance(value, Mapping) else {}
+
+
+def _vllm_env(resolved: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The engine's own vLLM environment variables, as it resolved them.
+
+    This is where ``VLLM_BATCH_INVARIANT`` actually lives in the response — not
+    at the top level. It matters more than it looks: vLLM's
+    ``override_envs_for_invariance()`` mutates this environment at startup, so
+    this block is the only place the *resolved* value can be observed.
+    """
+    return _as_mapping(resolved.get("vllm_env"))
 
 
 def _observed_batch_invariance(resolved: Mapping[str, Any], config: VllmConfig) -> bool | None:
     """Best-effort read of the engine's actual invariance state.
 
+    Reads ``vllm_env`` first, because that is where /server_info reports it. The
+    top-level lookup is kept as a fallback for engines that surface it directly.
+
     Returns ``None`` when the engine exposes nothing usable — in which case the
     receipt records what we set, and the writeup must say the readback was
-    unavailable rather than implying it was confirmed.
+    unavailable rather than implying it was confirmed. That distinction is the
+    whole of D-08: an unconfirmed value and a confirmed one must never be
+    presented as the same thing.
     """
-    for key in ("batch_invariant", "vllm_batch_invariant", "VLLM_BATCH_INVARIANT"):
-        if key in resolved:
-            value = resolved[key]
-            return bool(value) if isinstance(value, bool) else str(value) not in ("0", "", "false")
+    for source in (_vllm_env(resolved), resolved):
+        for key in ("VLLM_BATCH_INVARIANT", "batch_invariant", "vllm_batch_invariant"):
+            if key in source:
+                value = source[key]
+                if isinstance(value, bool):
+                    return value
+                return str(value).strip().lower() not in ("0", "", "false", "none")
     return None
 
 

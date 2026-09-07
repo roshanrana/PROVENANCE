@@ -103,6 +103,71 @@ def _mock_client(handler) -> httpx.Client:  # type: ignore[no-untyped-def]
     return httpx.Client(transport=httpx.MockTransport(handler))
 
 
+def _server_info(**fields: object):  # type: ignore[no-untyped-def]
+    """A handler shaped like the real /server_info response."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/version":
+            return httpx.Response(200, json={"version": "0.11.0", "git_sha": "abc"})
+        return httpx.Response(200, json=dict(fields))
+
+    return handler
+
+
+def test_dev_mode_is_enabled_so_server_info_exists() -> None:
+    """/server_info is registered only under VLLM_SERVER_DEV_MODE.
+
+    Without it the endpoint 404s, the readback degrades to "engine exposed no
+    server_info", and the receipt records what we asked for rather than what the
+    engine resolved — a silent D-08 violation in a well-formed receipt.
+    """
+    assert _config().environment()["VLLM_SERVER_DEV_MODE"] == "1"
+
+
+def test_readback_uses_the_unprefixed_path_and_json_format() -> None:
+    """`/server_info`, not `/v1/server_info`; and config_format=json.
+
+    Upstream attaches the router with no prefix, and the default "text" format
+    returns vllm_config as one str() blob nothing can be read out of.
+    """
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/version":
+            return httpx.Response(200, json={"version": "0.11.0"})
+        seen["path"] = request.url.path
+        seen["format"] = request.url.params.get("config_format", "")
+        return httpx.Response(200, json={"vllm_env": {"VLLM_BATCH_INVARIANT": "1"}})
+
+    with _mock_client(handler) as client:
+        read_resolved_state("http://engine", _config(batch_invariant=True), client=client)
+    assert seen["path"] == "/server_info"
+    assert seen["format"] == "json"
+
+
+def test_invariance_is_read_from_vllm_env_not_the_top_level() -> None:
+    """The refusal the whole design leans on has to actually fire.
+
+    /server_info nests the engine's environment under `vllm_env`. Looking only
+    at the top level meant _observed_batch_invariance always returned None, so
+    the mismatch check never triggered against any real engine.
+    """
+    handler = _server_info(vllm_env={"VLLM_BATCH_INVARIANT": "0"})
+    with (
+        _mock_client(handler) as client,
+        pytest.raises(EngineLaunchError, match="Refusing to measure"),
+    ):
+        read_resolved_state("http://engine", _config(batch_invariant=True), client=client)
+
+
+def test_text_format_config_does_not_crash_the_readback() -> None:
+    """Under config_format=text, vllm_config is a string, not an object."""
+    handler = _server_info(vllm_config="VllmConfig(model='qwen', ...)", vllm_env={})
+    with _mock_client(handler) as client:
+        state = read_resolved_state("http://engine", _config(batch_invariant=True), client=client)
+    assert state.tensor_parallel_size == 1
+
+
 def test_mismatched_invariance_is_refused() -> None:
     """The refusal that matters most.
 
@@ -114,7 +179,7 @@ def test_mismatched_invariance_is_refused() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/version":
             return httpx.Response(200, json={"version": "0.11.0"})
-        return httpx.Response(200, json={"batch_invariant": False})
+        return httpx.Response(200, json={"vllm_env": {"VLLM_BATCH_INVARIANT": "0"}})
 
     with (
         _mock_client(handler) as client,
@@ -130,10 +195,14 @@ def test_matching_invariance_is_accepted() -> None:
         return httpx.Response(
             200,
             json={
-                "batch_invariant": True,
-                "enable_prefix_caching": False,
-                "tensor_parallel_size": 1,
-                "attention_backend": "FLASH_ATTN",
+                "vllm_env": {
+                    "VLLM_BATCH_INVARIANT": "1",
+                    "VLLM_ATTENTION_BACKEND": "FLASH_ATTN",
+                },
+                "vllm_config": {
+                    "cache_config": {"enable_prefix_caching": False},
+                    "parallel_config": {"tensor_parallel_size": 1},
+                },
             },
         )
 
@@ -163,9 +232,14 @@ def test_missing_server_info_does_not_crash_the_run() -> None:
 def test_unreadable_invariance_returns_none_rather_than_guessing() -> None:
     """None means 'not confirmed', which the writeup must say — not imply it was."""
     assert _observed_batch_invariance({}, _config()) is None
+    assert _observed_batch_invariance({"vllm_env": {}}, _config()) is None
+    # Where it really lives.
+    assert _observed_batch_invariance({"vllm_env": {"VLLM_BATCH_INVARIANT": "1"}}, _config())
+    assert (
+        _observed_batch_invariance({"vllm_env": {"VLLM_BATCH_INVARIANT": "0"}}, _config()) is False
+    )
+    # Fallback for an engine that surfaces it directly.
     assert _observed_batch_invariance({"batch_invariant": True}, _config()) is True
-    assert _observed_batch_invariance({"VLLM_BATCH_INVARIANT": "0"}, _config()) is False
-    assert _observed_batch_invariance({"VLLM_BATCH_INVARIANT": "1"}, _config()) is True
 
 
 # --------------------------------------------------------------------------- probe

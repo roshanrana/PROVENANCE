@@ -25,6 +25,9 @@ def _complete(url: str, prompt: str = "hello", **extra: object) -> dict[str, Any
         "seed": 0,
         "temperature": 0.0,
         "max_tokens": 8,
+        # Opted in explicitly, as EngineClient does and as vLLM requires —
+        # token ids are absent from the response without it.
+        "return_token_ids": True,
         **extra,
     }
     body: dict[str, Any] = httpx.post(f"{url}/v1/completions", json=payload, timeout=10).json()

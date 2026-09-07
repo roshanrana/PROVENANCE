@@ -644,3 +644,26 @@ A gate written as an untested shell one-liner is a gate nobody has checked. This
 one fails the build if its own logic breaks.
 
 **S-02's verdict remains unrecorded.** Run #11 is the first that can earn it.
+
+---
+
+## Run #11 — the control holds; the verdict waits on power, not on interpretation
+
+`22b27ee`, green. Ground truth: **prefix index consulted 64 times for 64 probes,
+62 matched a non-zero prefix**, mean ratio 0.94, index size 8. The router had
+something to leak, so F-23 through F-26 have done their job — this is a negative
+result about *observability*, not an artefact of a cluster where nothing cached.
+
+The verdict printed `NO CLIENT-OBSERVABLE SIGNAL`, and it is still not recorded,
+for a new reason. Latency AUC was 0.5567 [0.4100, 0.6993] in run #8 and
+0.6202 [0.4766, 0.7575] in run #11 — both **above** chance with an interval
+straddling it. That is not evidence of absence; it is n=62 failing to resolve an
+effect of that size.
+
+`--repeats` moves to 200 (n=402), fixed in the workflow **before** the run that
+gets recorded. Whatever run #12 returns is what goes into `decisions.md`. At that
+n an effect of AUC≈0.62 would likely clear the pre-registered bar, so this makes
+the true answer more reachable rather than making `NO SIGNAL` more likely.
+
+Also fixed: the gate reported "consulted 128 times" for 64 probes by summing the
+two published metric families. It reports one, and names it.

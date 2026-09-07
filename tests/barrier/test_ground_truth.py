@@ -50,6 +50,7 @@ def test_a_real_dump_with_matches_satisfies_the_control() -> None:
     assert truth.matched_something == 24
     assert truth.index_size == 12
     assert truth.holds is True
+    assert truth.family.endswith("prefix_indexer_hit_ratio")
 
 
 def test_every_lookup_matching_nothing_fails_the_control() -> None:
@@ -103,3 +104,24 @@ def test_cli_exits_0_when_the_control_holds(tmp_path: Path) -> None:
     path = tmp_path / "metrics.txt"
     path.write_text(_REAL_SHAPE, encoding="utf-8")
     assert main([str(path)]) == 0
+
+
+def test_the_two_published_families_are_not_summed() -> None:
+    """Run #11 reported 'consulted 128 times' for 64 probes.
+
+    Upstream publishes the same observations under a deprecated name and a
+    current one. Adding them produced a count no reader could reconcile with the
+    probe count in the spike output, which invites distrust of the gate itself.
+    One family is reported, and named.
+    """
+    dump = """\
+inference_extension_prefix_indexer_hit_ratio_bucket{le="0"} 2
+inference_extension_prefix_indexer_hit_ratio_count 64
+llm_d_epp_prefix_indexer_hit_ratio_bucket{plugin_name="p",le="0"} 2
+llm_d_epp_prefix_indexer_hit_ratio_count{plugin_name="p"} 64
+"""
+    truth = read_ground_truth(dump)
+    assert truth.lookups == 64
+    assert truth.matched_nothing == 2
+    assert truth.matched_something == 62
+    assert truth.holds is True

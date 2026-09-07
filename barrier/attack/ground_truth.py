@@ -49,6 +49,12 @@ class GroundTruth:
     lookups: int
     matched_nothing: int
     index_size: float | None
+    #: Which metric family these counts came from, so the number in the log can
+    #: be checked against the dump. Reported per family rather than summed: the
+    #: two published families are the SAME observations under two names, and a
+    #: summed "consulted 128 times" for 64 probes is a number a reader would
+    #: rightly distrust.
+    family: str = ""
 
     @property
     def matched_something(self) -> int:
@@ -63,10 +69,11 @@ class GroundTruth:
         if self.lookups == 0:
             return "prefix index NEVER CONSULTED — no prefix_indexer_hit_ratio observations"
         size = "unknown" if self.index_size is None else f"{self.index_size:g}"
+        where = f" [{self.family}]" if self.family else ""
         return (
             f"prefix index consulted {self.lookups} times, "
             f"{self.matched_something} matched a non-zero prefix, "
-            f"{self.matched_nothing} matched nothing; index size {size}"
+            f"{self.matched_nothing} matched nothing; index size {size}{where}"
         )
 
 
@@ -90,30 +97,43 @@ def _parse_samples(text: str) -> list[tuple[str, str, float]]:
 def read_ground_truth(text: str) -> GroundTruth:
     """Extract the control from a Prometheus exposition dump.
 
-    Both published families are summed. They are the same observations under two
-    names, so summing double-counts — but the *ratio* of matched to total is what
-    the control turns on, and double-counting cannot turn a zero into a
-    non-zero. Preferring one name and having upstream rename it later would
-    silently disarm the gate, which is the failure this whole module exists to
-    prevent.
+    Upstream publishes the histogram twice — a deprecated `inference_extension_`
+    name and an `llm_d_epp_` one — carrying identical observations. Each family
+    is read separately and the one with the most observations is returned, so
+    the reported count matches the number of probes a reader can see in the
+    spike output. Summing them reported "consulted 128 times" for 64 probes,
+    which is a number that invites distrust of the whole gate.
+
+    Matching by *suffix* rather than by full name is deliberate: an upstream
+    rename must not silently disarm the control, which is the failure this
+    module exists to prevent.
     """
-    lookups = 0.0
-    matched_nothing = 0.0
+    lookups: dict[str, float] = {}
+    matched_nothing: dict[str, float] = {}
     index_size: float | None = None
 
     for name, labels, value in _parse_samples(text):
         if name.endswith(INDEX_SIZE_SUFFIX):
             index_size = value if index_size is None else max(index_size, value)
         elif name.endswith(f"{HIT_RATIO_SUFFIX}_count"):
-            lookups += value
+            family = name[: -len("_count")]
+            lookups[family] = lookups.get(family, 0.0) + value
         elif name.endswith(f"{HIT_RATIO_SUFFIX}_bucket"):
             le = _LE.search(labels)
             # The zero bucket, however Prometheus chose to format it.
             if le is not None and _is_zero(le.group(1)):
-                matched_nothing += value
+                family = name[: -len("_bucket")]
+                matched_nothing[family] = matched_nothing.get(family, 0.0) + value
 
+    if not lookups:
+        return GroundTruth(lookups=0, matched_nothing=0, index_size=index_size)
+
+    family = max(lookups, key=lambda k: lookups[k])
     return GroundTruth(
-        lookups=int(lookups), matched_nothing=int(matched_nothing), index_size=index_size
+        lookups=int(lookups[family]),
+        matched_nothing=int(matched_nothing.get(family, 0.0)),
+        index_size=index_size,
+        family=family,
     )
 
 

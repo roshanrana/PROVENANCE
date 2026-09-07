@@ -115,8 +115,17 @@ jobs:
       # the fact. Both outcomes are publishable: no client-observable signal
       # rescopes FR-B-03 to an instrumented demonstration, which the
       # requirements were written to survive (NFR-17).
+      # --repeats 200 gives n=402 per continuous channel. Fixed HERE, before the
+      # run that gets recorded, and it is a power decision rather than a
+      # threshold one: runs #8 and #11 both put the latency AUC point estimate
+      # above chance (0.556, 0.620) with an interval that straddled it, which is
+      # what n=62 looks like when it cannot resolve an effect of that size.
+      # Reporting "no signal" from that would overstate what the data supports;
+      # so would re-running at 62 until an interval happened to land clear of
+      # chance. n=402 is chosen once, and the verdict it returns is the verdict
+      # recorded, whichever way it goes.
       - name: Run the S-02 spike
-        run: uv run python -m barrier.attack.spike_s02 --gateway http://localhost:8080 --repeats 30
+        run: uv run python -m barrier.attack.spike_s02 --gateway http://localhost:8080 --repeats 200
 
       # The spike says so itself, in every run: "a spike that only looked
       # client-side cannot tell 'no signal' from 'we did not look'." A verdict of

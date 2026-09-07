@@ -125,11 +125,18 @@ func (p *TenantSalt) RequestHeader(_ context.Context, request *fwksched.Inferenc
 // ApplySalt stamps the derived salt onto whichever request variant is populated.
 //
 // CacheSalt is not a field on InferenceRequestBody — it lives on each endpoint
-// type (completions, chat, messages, ...) and on TokenizedRequest, which is what
+// type (completions, chat, messages, ...) and on TokenizedPrompt, which is what
 // the prefix hasher actually reads. Setting only one of them would close the
 // channel for one API surface and silently leave the others open, which is the
 // kind of partial fix that is worse than none because it still gets published as
 // a fix.
+//
+// The list below is not enumerated from memory. It is the exact set that
+// tokenizer.CacheSaltFromBody switches over in llm-d-router v0.10.0 — the
+// function the prefix hasher calls to decide what salt seeds the chain. Any
+// variant it reads and we do not write is a hole; any variant we write and it
+// does not read is harmless. Images is the one body variant with no CacheSalt
+// field at all, so there is nothing to set.
 //
 // Every assignment OVERRIDES rather than deferring to a client-supplied value:
 // that value is precisely the forgery vector being closed.
@@ -161,10 +168,17 @@ func ApplySalt(body *fwkrh.InferenceRequestBody, salt string) int {
 	if body.Embeddings != nil {
 		set(&body.Embeddings.CacheSalt)
 	}
+	// The pre-tokenized path: vLLM's /inference/v1/generate, and the shape an
+	// SGLang-backed pool is driven through. Omitting it would leave the
+	// mitigation inert for exactly the tenants routed to a tokenized endpoint,
+	// while the hardened profile still reported itself as hardened.
+	if body.Generate != nil {
+		set(&body.Generate.CacheSalt)
+	}
 	// The one that seeds the EPP's own prefix hash chain (obligation 2). The
 	// others carry it to the engine (obligation 3).
-	if body.TokenizedRequest != nil {
-		set(&body.TokenizedRequest.CacheSalt)
+	if body.TokenizedPrompt != nil {
+		set(&body.TokenizedPrompt.CacheSalt)
 	}
 	return applied
 }

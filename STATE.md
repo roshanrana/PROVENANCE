@@ -544,3 +544,36 @@ oracle code is written, until a run under the corrected rule returns one.
 The topology works end to end: EPP 1/1 with ext-proc on 9002, gateway 1/1 with
 all Envoy clusters initialized, both simulators Ready, 24 probes answered. F-18,
 F-20, F-21 and F-22 are closed by a run rather than by an argument.
+
+---
+
+## Finding F-24 — the fix for F-23 did not fire, for a subtler reason
+
+Run #7 (`677dee4`) returned `ORACLE VIABLE` on
+`x-envoy-upstream-service-time` again, with no rejection printed: the corrected
+rule never triggered.
+
+F-23's fix rejected a field whose values were *all distinct* on both sides.
+Millisecond integers collide by chance over eleven probes, so that test was
+simply false. The fix was looking for a pattern in the values when what
+disqualifies the field is the **type** of the values.
+
+**Correction.** The spike now separates two kinds of evidence:
+
+- **Categorical** (non-numeric): must differ in every pair, and no value may
+  appear on both sides.
+- **Continuous** (latency, and every numeric header): judged by
+  `common.stats.decision.decide` — the pre-registered AUC / bootstrap CI /
+  permutation rule from NFR-05, scored in both orientations, keeping the
+  attacker-favourable one.
+
+The timing question is now *answered* rather than narrated. `--repeats` in CI
+goes 10 → 30.
+
+**Thresholds unchanged**, and `tests/common/test_decision_thresholds.py` still
+guards them. The full argument for why this is a correction rather than tuning —
+and the three things a reader should check to hold us to that — is in
+`bench/results/s02-run6-2026-09-07.md`, along with both wrong runs.
+
+**S-02's verdict remains unrecorded.** Nothing reaches `decisions.md` until a run
+under the corrected rule returns one.

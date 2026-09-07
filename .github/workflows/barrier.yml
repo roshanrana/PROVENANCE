@@ -116,7 +116,7 @@ jobs:
       # rescopes FR-B-03 to an instrumented demonstration, which the
       # requirements were written to survive (NFR-17).
       - name: Run the S-02 spike
-        run: uv run python -m barrier.attack.spike_s02 --gateway http://localhost:8080
+        run: uv run python -m barrier.attack.spike_s02 --gateway http://localhost:8080 --repeats 30
 
       - name: Collect cluster state on failure
         if: failure()

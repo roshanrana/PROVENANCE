@@ -9,7 +9,13 @@ the wrong path.
 
 from __future__ import annotations
 
-from barrier.attack.spike_s02 import DECISION_RULE, Probe, SpikeResult, find_discriminators
+from barrier.attack.spike_s02 import (
+    DECISION_RULE,
+    Probe,
+    SpikeResult,
+    find_discriminators,
+    measure_numeric_channels,
+)
 
 
 def _probe(label: str, headers: dict[str, str], body_keys: list[str] | None = None) -> Probe:
@@ -63,8 +69,8 @@ def test_body_shape_difference_counts() -> None:
 
 def test_discriminators_across_many_pairs_are_unioned() -> None:
     pairs = [
-        (_probe("h1", {"x-a": "1"}), _probe("m1", {"x-a": "2"})),
-        (_probe("h2", {"x-b": "1"}), _probe("m2", {"x-b": "2"})),
+        (_probe("h1", {"x-a": "pod-1"}), _probe("m1", {"x-a": "pod-2"})),
+        (_probe("h2", {"x-b": "pod-1"}), _probe("m2", {"x-b": "pod-2"})),
     ]
     assert find_discriminators(pairs) == ["header:x-a", "header:x-b"]
 
@@ -117,7 +123,7 @@ def test_a_per_request_timer_is_not_a_discriminator() -> None:
     ]
     rejected: dict[str, str] = {}
     assert find_discriminators(pairs, rejected) == []
-    assert "measures the request" in rejected["header:x-envoy-upstream-service-time"]
+    assert "measurement" in rejected["header:x-envoy-upstream-service-time"]
 
 
 def test_a_stable_routing_header_survives_the_same_number_of_pairs() -> None:
@@ -132,10 +138,69 @@ def test_a_stable_routing_header_survives_the_same_number_of_pairs() -> None:
 def test_a_field_that_differs_only_sometimes_is_rejected() -> None:
     """An oracle that classifies correctly two times in three is not an oracle."""
     pairs = [
-        (_probe("h1", {"x-a": "1"}), _probe("m1", {"x-a": "2"})),
-        (_probe("h2", {"x-a": "1"}), _probe("m2", {"x-a": "2"})),
-        (_probe("h3", {"x-a": "1"}), _probe("m3", {"x-a": "1"})),
+        (_probe("h1", {"x-a": "pod-1"}), _probe("m1", {"x-a": "pod-2"})),
+        (_probe("h2", {"x-a": "pod-1"}), _probe("m2", {"x-a": "pod-2"})),
+        (_probe("h3", {"x-a": "pod-1"}), _probe("m3", {"x-a": "pod-1"})),
     ]
     rejected: dict[str, str] = {}
     assert find_discriminators(pairs, rejected) == []
     assert "2 of 3" in rejected["header:x-a"]
+
+
+def test_a_numeric_header_that_separates_perfectly_is_still_not_categorical() -> None:
+    """Run #7's lesson: duplicate millisecond values defeated the first fix.
+
+    The first correction rejected a field whose values were *all distinct* on
+    both sides. Millisecond integers collide by chance, so the same header
+    survived a second run under the same wrong verdict. What makes it not a
+    discriminator is not the pattern of its values but their *type*: it is a
+    measurement, and measurements go to the pre-registered statistical rule.
+    """
+    pairs = [
+        (
+            _probe(f"h{i}", {"x-envoy-upstream-service-time": "205"}),
+            _probe(f"m{i}", {"x-envoy-upstream-service-time": "216"}),
+        )
+        for i in range(6)
+    ]
+    rejected: dict[str, str] = {}
+    assert find_discriminators(pairs, rejected) == []
+    assert "pre-registered" in rejected["header:x-envoy-upstream-service-time"]
+
+
+def test_a_value_seen_on_both_sides_cannot_classify() -> None:
+    pairs = [
+        (_probe("h1", {"x-served-by": "pod-1"}), _probe("m1", {"x-served-by": "pod-2"})),
+        (_probe("h2", {"x-served-by": "pod-2"}), _probe("m2", {"x-served-by": "pod-1"})),
+        (_probe("h3", {"x-served-by": "pod-1"}), _probe("m3", {"x-served-by": "pod-2"})),
+    ]
+    rejected: dict[str, str] = {}
+    assert find_discriminators(pairs, rejected) == []
+    assert "both sides" in rejected["header:x-served-by"]
+
+
+def test_measurements_go_through_the_pre_registered_rule() -> None:
+    """Latency is judged, not narrated. A separation this clean must clear the bar."""
+    pairs = [
+        (
+            Probe("h", "p", "tenant-a", 200, 10.0 + i * 0.1, {}, ["choices"], "c"),
+            Probe("m", "p", "tenant-a", 200, 90.0 + i * 0.1, {}, ["choices"], "c"),
+        )
+        for i in range(20)
+    ]
+    m = measure_numeric_channels(pairs)
+    assert m["latency_ms"]["auc"] == 1.0
+    assert m["latency_ms"]["attack_succeeds"] is True
+
+
+def test_noise_does_not_clear_the_pre_registered_bar() -> None:
+    """The simulator case: overlapping latencies must not be called an oracle."""
+    pairs = [
+        (
+            Probe("h", "p", "tenant-a", 200, 200.0 + (i % 5), {}, ["choices"], "c"),
+            Probe("m", "p", "tenant-a", 200, 200.0 + ((i + 2) % 5), {}, ["choices"], "c"),
+        )
+        for i in range(20)
+    ]
+    m = measure_numeric_channels(pairs)
+    assert m["latency_ms"]["attack_succeeds"] is False

@@ -82,6 +82,9 @@ class SpikeResult:
     # because "we looked and rejected it" and "we never looked" are different
     # claims, and only one of them is checkable.
     rejected: dict[str, str] = field(default_factory=dict)
+    # Continuous channels — latency and every numeric header — each carrying the
+    # full pre-registered verdict: AUC, its bootstrap interval, and p.
+    measurements: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -90,12 +93,20 @@ class SpikeResult:
             "notes": self.notes,
             "client_observable_discriminators": self.discriminators,
             "rejected_candidates": self.rejected,
+            "measurements": self.measurements,
+            "significant_measurements": self.significant_measurements(),
             "verdict": self.verdict(),
         }
+
+    def significant_measurements(self) -> list[str]:
+        """Continuous channels that clear the pre-registered bar, by name."""
+        return sorted(k for k, v in self.measurements.items() if v.get("attack_succeeds"))
 
     def verdict(self) -> str:
         if self.discriminators:
             return "ORACLE VIABLE — client-observable discriminator(s) found"
+        if self.significant_measurements():
+            return "ORACLE VIABLE — a continuous channel clears the pre-registered bar"
         return "NO CLIENT-OBSERVABLE SIGNAL — rescope FR-B-03 per LLD §7"
 
 
@@ -131,6 +142,67 @@ def probe_once(
         body_keys=sorted(body.keys()),
         body_id=body.get("id"),
     )
+
+
+#: Fixed here, not passed in, so a re-run cannot be reseeded until it says
+#: something nicer. Same discipline as the ATTEST harness.
+SPIKE_RNG_SEED = 20260907
+
+
+def _is_numeric(value: str) -> bool:
+    try:
+        float(value)
+    except ValueError:
+        return False
+    return True
+
+
+def measure_numeric_channels(pairs: list[tuple[Probe, Probe]]) -> dict[str, dict[str, Any]]:
+    """Judge every continuous channel by the pre-registered rule.
+
+    Latency, and any header whose values are numbers, are *measurements*. Asking
+    "did this field differ?" of a measurement is a category error — two timings
+    essentially never coincide, so the answer is always yes and it means nothing.
+    The question that means something was fixed in advance in
+    `common.stats.decision`: does the value separate the two classes well enough,
+    with a tight enough interval and a small enough p, to count as an oracle
+    (NFR-05)?
+
+    Applying that rule here is not a new decision. It is the decision this
+    project already made, applied to the evidence it was written for.
+    """
+    from common.stats.decision import decide
+
+    channels: dict[str, list[tuple[float, bool]]] = {"latency_ms": []}
+    for hit, miss in pairs:
+        channels["latency_ms"].append((hit.elapsed_ms, True))
+        channels["latency_ms"].append((miss.elapsed_ms, False))
+        for key in set(hit.headers) | set(miss.headers):
+            values = [hit.headers.get(key), miss.headers.get(key)]
+            if not all(v is not None and _is_numeric(v) for v in values):
+                continue
+            bucket = channels.setdefault(f"header:{key}", [])
+            bucket.append((float(hit.headers[key]), True))
+            bucket.append((float(miss.headers[key]), False))
+
+    out: dict[str, dict[str, Any]] = {}
+    for name, samples in channels.items():
+        labels = [is_hit for _, is_hit in samples]
+        if not any(labels) or all(labels):
+            continue
+        scores = [score for score, _ in samples]
+        # Evaluated in BOTH orientations, keeping the stronger. An attacker who
+        # notices that cache hits are the *slower* class simply inverts the test,
+        # so scoring only one direction would report a perfect oracle as AUC 0.0
+        # and call it clean. This is the attacker-favourable reading, which is
+        # the conservative one for a security claim.
+        forward = decide(labels, scores, rng_seed=SPIKE_RNG_SEED)  # type: ignore[arg-type]
+        inverse = decide(labels, [-s for s in scores], rng_seed=SPIKE_RNG_SEED)  # type: ignore[arg-type]
+        verdict, orientation = (
+            (forward, "higher-is-hit") if forward.auc >= inverse.auc else (inverse, "lower-is-hit")
+        )
+        out[name] = {**verdict.to_dict(), "orientation": orientation}
+    return out
 
 
 # A field observed in fewer pairs than this cannot be told apart from noise: one
@@ -185,6 +257,19 @@ def find_discriminators(
         differing = sum(1 for h, m in obs if h != m)
         if differing == 0:
             continue
+
+        values = [v for pair in obs for v in pair if v is not None]
+        if values and all(_is_numeric(v) for v in values):
+            # A measurement, not a label. It is not discarded — it is handed to
+            # `measure_numeric_channels` and judged by the pre-registered rule in
+            # `common.stats.decision`, which is what this project fixed in
+            # advance for exactly this kind of evidence (NFR-05).
+            rejected[f"header:{key}"] = (
+                "numeric-valued, so a measurement rather than a categorical label; "
+                "judged by the pre-registered AUC rule under measurements, not here"
+            )
+            continue
+
         if differing != len(obs):
             rejected[f"header:{key}"] = (
                 f"differs in only {differing} of {len(obs)} hit/miss pairs; an oracle "
@@ -192,12 +277,13 @@ def find_discriminators(
             )
             continue
         if len(obs) >= MIN_PAIRS_TO_JUDGE_VARIABILITY:
-            hits = [h for h, _ in obs]
-            misses = [m for _, m in obs]
-            if len(set(hits)) == len(hits) and len(set(misses)) == len(misses):
+            hits = {h for h, _ in obs}
+            misses = {m for _, m in obs}
+            if hits & misses:
+                shared = sorted(str(v) for v in (hits & misses))[:3]
                 rejected[f"header:{key}"] = (
-                    f"a fresh value on every one of {len(obs)} probes on both sides; it "
-                    "measures the request, not the cache state"
+                    f"value(s) {shared} appear on both sides across {len(obs)} pairs, so "
+                    "seeing one does not tell a caller which class produced it"
                 )
                 continue
         found.add(f"header:{key}")
@@ -247,6 +333,7 @@ def run_spike(gateway: str, key_a: str, key_b: str, repeats: int, out_dir: Path)
             pairs.append((hit, miss))
 
     result.discriminators = find_discriminators(pairs, result.rejected)
+    result.measurements = measure_numeric_channels(pairs)
 
     hit_times = [p.elapsed_ms for p in result.probes if "hit" in p.label]
     miss_times = [p.elapsed_ms for p in result.probes if "miss" in p.label]
@@ -293,7 +380,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  note: {note}")
     for name, reason in sorted(result.rejected.items()):
         print(f"  rejected: {name} — {reason}")
+    print("\nmeasurements, by the pre-registered rule (NFR-05):")
+    for name, verdict in sorted(result.measurements.items()):
+        print(
+            f"  {name}: AUC={verdict['auc']:.4f} "
+            f"[{verdict['ci_lo']:.4f}, {verdict['ci_hi']:.4f}] "
+            f"p={verdict['p_value']:.4g} n={verdict['n']} "
+            f"clears_bar={verdict['attack_succeeds']}"
+        )
     print(f"\nclient-observable discriminators: {result.discriminators or 'NONE'}")
+    print(f"significant measurements: {result.significant_measurements() or 'NONE'}")
     print(f"\nVERDICT: {result.verdict()}")
     print(f"\n{DECISION_RULE}")
     print(

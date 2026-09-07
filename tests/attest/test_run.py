@@ -239,8 +239,14 @@ def test_resuming_a_missing_run_is_refused(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- failures
 
 
-def test_engine_failure_marks_the_cell_and_continues(tmp_path: Path) -> None:
-    """One bad cell must not abandon a paid session's remaining work."""
+def test_an_unreachable_engine_leaves_cells_pending_not_burned(tmp_path: Path) -> None:
+    """A dead engine must not permanently exclude cells from the dataset.
+
+    FAILED is never retried, by design — it means "this cell produced bad data".
+    An engine that was not reachable produced no data at all, so burning the
+    cells would let a transient outage silently shrink a paid session's matrix.
+    They stay PENDING and a resume picks them up.
+    """
     outcome = execute(
         engine_url="http://127.0.0.1:1",  # nothing listening
         cells=_cells(),
@@ -249,11 +255,10 @@ def test_engine_failure_marks_the_cell_and_continues(tmp_path: Path) -> None:
         command="test",
         git=GIT,
     )
-    assert outcome.cells_failed == outcome.cells_total
     assert outcome.cells_done == 0
+    assert outcome.cells_failed == 0
     states = Ledger.in_dir(outcome.run_dir).states()
-    assert all(s.state is CellState.FAILED for s in states.values())
-    assert all("EngineError" in (s.error or "") for s in states.values())
+    assert all(s.state is CellState.PENDING for s in states.values())
 
 
 # --------------------------------------------------------------------------- stage 1
@@ -348,10 +353,13 @@ def test_a_cell_is_skipped_when_the_engine_contradicts_it() -> None:
 
 
 def test_an_unreachable_engine_does_not_silently_pass_the_guard() -> None:
-    """None means 'could not compare', not 'agrees'.
+    """An engine that cannot be read is refused, not waved through.
 
-    The distinction matters because the receipt records the readback state; an
-    unconfirmed value and a confirmed one must never be presented as the same.
+    The first version returned "no objection" here, and an entire H100 stage-2
+    run came back with both arms measured against the same engine — because
+    EngineClient.resolved_state reads a stub-only endpoint that 404s on real
+    vLLM. A result whose label nothing can confirm is not a cheaper result; it
+    is a wrong one that costs the same.
     """
     from attest.harness.matrix import Cell, CellParams
     from attest.harness.run import _engine_disagrees_with
@@ -369,4 +377,6 @@ def test_an_unreachable_engine_does_not_silently_pass_the_guard() -> None:
             seed=0,
         ),
     )
-    assert _engine_disagrees_with("http://127.0.0.1:1", cell) is None
+    reason = _engine_disagrees_with("http://127.0.0.1:1", cell)
+    assert reason is not None
+    assert "could not read" in reason

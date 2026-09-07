@@ -231,15 +231,13 @@ def test_missing_server_info_does_not_crash_the_run() -> None:
 
 def test_unreadable_invariance_returns_none_rather_than_guessing() -> None:
     """None means 'not confirmed', which the writeup must say — not imply it was."""
-    assert _observed_batch_invariance({}, _config()) is None
-    assert _observed_batch_invariance({"vllm_env": {}}, _config()) is None
+    assert _observed_batch_invariance({}) is None
+    assert _observed_batch_invariance({"vllm_env": {}}) is None
     # Where it really lives.
-    assert _observed_batch_invariance({"vllm_env": {"VLLM_BATCH_INVARIANT": "1"}}, _config())
-    assert (
-        _observed_batch_invariance({"vllm_env": {"VLLM_BATCH_INVARIANT": "0"}}, _config()) is False
-    )
+    assert _observed_batch_invariance({"vllm_env": {"VLLM_BATCH_INVARIANT": "1"}})
+    assert _observed_batch_invariance({"vllm_env": {"VLLM_BATCH_INVARIANT": "0"}}) is False
     # Fallback for an engine that surfaces it directly.
-    assert _observed_batch_invariance({"batch_invariant": True}, _config()) is True
+    assert _observed_batch_invariance({"batch_invariant": True}) is True
 
 
 # --------------------------------------------------------------------------- probe

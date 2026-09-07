@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from attest.analysis.divergence import Observation, summarise_cell
 from attest.harness.engine import EngineClient, EngineError
 from attest.harness.ledger import CellState, Ledger
@@ -120,27 +122,66 @@ def run_cell(engine_url: str, cell: Cell, run_dir: Path) -> list[dict[str, Any]]
     return records
 
 
+def _engine_determinism(engine_url: str) -> bool | None:
+    """What the LIVE engine reports about its own invariance, or None.
+
+    Two endpoints, because there are two kinds of engine and asking only one is
+    how the first version of this guard failed. ``EngineClient.resolved_state``
+    reads ``/_stub/resolved_config``, which exists **only on the test stub**.
+    Against a real vLLM it 404s, the guard caught the EngineError, returned
+    "could not compare", and every cell ran regardless — so the guard written to
+    stop a mislabelled comparison silently permitted one, on real hardware,
+    which is exactly the failure it names.
+
+    Real engines are therefore asked first, by the path that actually exists.
+    """
+    from attest.harness.vllm import _observed_batch_invariance
+
+    try:
+        response = httpx.get(
+            f"{engine_url.rstrip('/')}/server_info",
+            params={"config_format": "json"},
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        observed = _observed_batch_invariance(response.json())
+        if observed is not None:
+            return observed
+    except (httpx.HTTPError, ValueError):
+        pass
+
+    try:
+        with EngineClient(engine_url) as engine:
+            return engine.resolved_state().deterministic
+    except EngineError:
+        return None
+
+
 def _engine_disagrees_with(engine_url: str, cell: Cell) -> str | None:
     """Does the live engine contradict what this cell claims to be measuring?
 
-    Returns a reason when the engine's readback disagrees with the cell's
-    ``batch_invariant``, or None when they agree or the engine exposes nothing
-    usable. An unreadable engine is NOT treated as agreement in the writeup —
-    the receipt records the readback state, and an unconfirmed value and a
-    confirmed one must never be presented as the same thing (D-08).
+    **Fails closed.** If the engine's invariance state cannot be read at all,
+    the cell is refused rather than run. The first version returned "no
+    objection" in that case, which is how an entire H100 stage-2 run came back
+    with both arms measured against the same engine and a headline result that
+    was an artifact. A result whose label cannot be verified is not a cheaper
+    result; it is a wrong one that costs the same.
     """
-    try:
-        with EngineClient(engine_url) as engine:
-            state = engine.resolved_state()
-    except EngineError:
-        return None  # nothing to compare against; the cell's own receipt says so
-    if state.deterministic != cell.params.batch_invariant:
+    observed = _engine_determinism(engine_url)
+    if observed is None:
+        return (
+            "could not read the engine's invariance state from /server_info or "
+            "/_stub/resolved_config. Refusing to measure: the cell claims "
+            f"batch_invariant={cell.params.batch_invariant} and nothing here can "
+            "confirm it, so the result would carry a label no one checked."
+        )
+    if observed != cell.params.batch_invariant:
         return (
             f"cell wants batch_invariant={cell.params.batch_invariant} but the engine "
-            f"reports deterministic={state.deterministic}. Refusing to measure: "
-            f"batch invariance is an engine-wide env var read at import, so it cannot "
-            f"change without a restart, and running this cell here would label the "
-            f"result with a configuration that was never active."
+            f"reports {observed}. Refusing to measure: batch invariance is an "
+            "engine-wide env var read at import, so it cannot change without a "
+            "restart, and running this cell here would label the result with a "
+            "configuration that was never active."
         )
     return None
 

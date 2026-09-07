@@ -180,7 +180,7 @@ def read_resolved_state(
         if owns_client:
             http.close()
 
-    observed_invariant = _observed_batch_invariance(resolved, config)
+    observed_invariant = _observed_batch_invariance(resolved)
     if observed_invariant is not None and observed_invariant != config.batch_invariant:
         raise EngineLaunchError(
             f"engine reports batch_invariant={observed_invariant} but the run "
@@ -229,7 +229,7 @@ def _vllm_env(resolved: Mapping[str, Any]) -> Mapping[str, Any]:
     return _as_mapping(resolved.get("vllm_env"))
 
 
-def _observed_batch_invariance(resolved: Mapping[str, Any], config: VllmConfig) -> bool | None:
+def _observed_batch_invariance(resolved: Mapping[str, Any]) -> bool | None:
     """Best-effort read of the engine's actual invariance state.
 
     Reads ``vllm_env`` first, because that is where /server_info reports it. The

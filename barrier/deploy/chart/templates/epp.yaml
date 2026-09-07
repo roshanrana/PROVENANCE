@@ -1,3 +1,51 @@
+{{/*
+  The Endpoint Picker.
+
+  Run in llm-d's STANDALONE discovery mode: `--endpoint-selector` over pod
+  labels instead of an InferencePool CRD. Upstream supports both, and the CRD
+  path would drag the Gateway API Inference Extension CRDs into a topology whose
+  entire purpose is to be readable in one sitting. The scheduling profile — the
+  one file the whole result turns on — is identical either way.
+*/}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: provenance-epp
+---
+{{/*
+  Standalone discovery means the EPP watches pods itself. Namespaced Role, not
+  ClusterRole: it needs to see the simulator pods in this namespace and nothing
+  else, and a demonstration about tenant isolation should not ask for
+  cluster-wide read to make its own deployment easier.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: provenance-epp
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: provenance-epp
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: provenance-epp
+subjects:
+  - kind: ServiceAccount
+    name: provenance-epp
+    namespace: {{ .Release.Namespace }}
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -30,28 +78,64 @@ spec:
         # over a running default cluster would keep serving the old config —
         # and the run would look hardened while behaving exactly as before.
         provenance/config-sha: {{ toYaml .Values.routing.schedulingProfiles | sha256sum }}
+        {{- with .Values.plugins }}
+        provenance/plugins-sha: {{ toYaml . | sha256sum }}
+        {{- end }}
     spec:
+      serviceAccountName: provenance-epp
       containers:
         - name: epp
           image: {{ .Values.epp.image }}
-          # ko side-loads the image directly into the kind node, so there is no
-          # registry to pull it from. Always would fail; IfNotPresent uses what
-          # was loaded. up.sh rebuilds and reloads on every run, so this cannot
-          # go stale — and a stale EPP is exactly what makes a hardened profile
-          # behave like a default one.
+          # The image is side-loaded into the kind nodes, so there is no registry
+          # to pull it from — Always would fail. up.sh gives every build a tag
+          # nothing else can have produced, so IfNotPresent cannot resolve to a
+          # stale binary, which is what would make a hardened profile behave like
+          # a default one (ADR-008, F-20).
           imagePullPolicy: IfNotPresent
           args:
             - --config-file=/etc/epp/config.yaml
+            # Standalone discovery: watch the simulator pods directly.
+            - --endpoint-selector=app=provenance-sim
+            - --endpoint-target-ports=8000
+            # Plaintext gRPC. Envoy's ext_proc cluster here has no TLS context,
+            # and a self-signed handshake inside one kind cluster would add a
+            # moving part without adding a claim.
+            - --secure-serving=false
+            - --grpc-health-port=9003
             - --v={{ if eq .Values.epp.logLevel "debug" }}4{{ else }}2{{ end }}
             {{- with .Values.epp.extraArgs }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- with .Values.epp.env }}
-          env: {{ toYaml . | nindent 12 }}
-          {{- end }}
+          env:
+            # resolvePoolNamespace() reads NAMESPACE; standalone mode derives its
+            # own identity from POD_NAME. Both are required for the runner to
+            # start, and omitting them fails at boot rather than at request time.
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef: { fieldPath: metadata.namespace }
+            - name: POD_NAME
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name }
+            {{- with .Values.epp.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           ports:
-            - containerPort: 9002
-            - containerPort: 9090
+            - name: grpc
+              containerPort: 9002
+            - name: grpc-health
+              containerPort: 9003
+            - name: metrics
+              containerPort: 9090
+          # The rollout wait in up.sh is only meaningful if readiness means "will
+          # answer ext_proc". A pod that is Running but not serving gRPC would
+          # let the spike start against a gateway that 503s everything.
+          livenessProbe:
+            grpc: { port: 9003, service: inference-extension }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            grpc: { port: 9003, service: inference-extension }
+            periodSeconds: 2
           volumeMounts:
             - name: config
               mountPath: /etc/epp
@@ -68,5 +152,7 @@ spec:
   ports:
     - name: grpc
       port: 9002
+    - name: grpc-health
+      port: 9003
     - name: metrics
       port: 9090

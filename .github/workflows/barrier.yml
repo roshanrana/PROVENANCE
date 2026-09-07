@@ -96,12 +96,19 @@ jobs:
           kubectl -n provenance port-forward svc/provenance-gateway 8080:80 &
           # Wait for the forward rather than sleeping a fixed amount: a fixed
           # sleep either wastes runner minutes or races a slow rollout.
+          #
+          # ANY HTTP status counts as up, including 503. The gateway routes
+          # through an ORIGINAL_DST cluster whose destination the EPP chooses per
+          # request, so a bare `GET /` is *expected* to 503 — there is no default
+          # backend. `curl -sf` treats that as failure, so the earlier form here
+          # would have waited the full two minutes and then declared a healthy
+          # gateway dead.
           for _ in $(seq 1 60); do
-            curl -sf -o /dev/null http://localhost:8080/ && break
+            curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://localhost:8080/ \
+              | grep -qE '^[1-5][0-9][0-9]$' && break
             sleep 2
           done
-          curl -sf -o /dev/null http://localhost:8080/ \
-            || echo "gateway did not answer; the spike will record that as its result"
+          echo "gateway answered: $(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://localhost:8080/ || echo none)"
 
       # The spike's decision rule was fixed in advance (LLD §7) and travels
       # inside its own evidence file, so a result cannot be rationalised after
@@ -118,6 +125,11 @@ jobs:
           kubectl -n provenance describe pods || true
           kubectl -n provenance logs -l app=provenance-epp --tail=200 || true
           kubectl -n provenance logs -l app=provenance-sim --tail=100 || true
+          # The gateway's own log is where an ext_proc misconfiguration shows up
+          # — Envoy refuses to start on an unknown field, and without this the
+          # symptom is a silent CrashLoopBackOff (F-18).
+          kubectl -n provenance logs -l app=provenance-gateway --tail=200 || true
+          kubectl -n provenance get events --sort-by=.lastTimestamp | tail -40 || true
 
       # The transcript IS the deliverable. up.sh writes rendered manifests and a
       # manifest.json carrying the values hash, so a reader can see exactly what

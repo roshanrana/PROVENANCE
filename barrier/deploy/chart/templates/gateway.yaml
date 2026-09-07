@@ -1,9 +1,26 @@
 {{/*
   The proxy — and therefore the trust boundary (docs/threat-model.md §3).
 
-  stripInboundHeaders is the load-bearing line in the hardened profile. Without
-  it the identity header is attacker-controlled and the mitigation is forgeable
-  at the edge, so it is rendered here explicitly rather than assumed.
+  Two things live here, and F-18 was that neither of them did.
+
+  1. THE EXT_PROC FILTER. The EPP is an Envoy external processor: Envoy hands it
+     the request headers and body, it picks an endpoint and answers with
+     `x-gateway-destination-endpoint`, and Envoy forwards there via an
+     ORIGINAL_DST cluster. Until this filter existed the EPP was deployed,
+     healthy, and *not in the request path* — so the tenant-salt plugin could
+     never run, and `default` and `hardened` would have produced byte-identical
+     results while the writeup called one of them a mitigation. That is the
+     single worst failure mode available to this project, and it survived
+     unnoticed because nothing had ever stood the topology up.
+
+  2. stripInboundHeaders, the load-bearing line of the hardened profile. It was
+     rendered under `route:` — that is `RouteAction`, which has no such field.
+     Envoy rejects an unknown field at boot, so the hardened gateway would have
+     crash-looped. It belongs on the `Route`, one level up, and now sits there.
+
+  `request_body_mode: FULL_DUPLEX_STREAMED` is not a preference: llm-d's README
+  states it is the only supported mode, and it needs Envoy >= 1.33 — hence the
+  pinned image below rather than the v1.31 tag this file used to carry.
 */}}
 apiVersion: v1
 kind: ConfigMap
@@ -11,6 +28,9 @@ metadata:
   name: provenance-gateway-config
 data:
   envoy.yaml: |
+    admin:
+      address:
+        socket_address: { address: 127.0.0.1, port_value: 19000 }
     static_resources:
       listeners:
         - address:
@@ -22,33 +42,83 @@ data:
                     "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                     stat_prefix: provenance
                     route_config:
+                      name: provenance
                       virtual_hosts:
                         - name: all
                           domains: ["*"]
                           routes:
                             - match: { prefix: "/" }
+                              {{- with .Values.proxy.stripInboundHeaders }}
+                              # On the Route, not the RouteAction. Removed before
+                              # ext_proc sees the request, so the EPP reads only
+                              # what the proxy vouches for (ADR-006).
+                              request_headers_to_remove:
+                              {{- range . }}
+                                - {{ . }}
+                              {{- end }}
+                              {{- end }}
                               route:
-                                cluster: sim
-                                {{- with .Values.proxy.stripInboundHeaders }}
-                                request_headers_to_remove:
-                                {{- range . }}
-                                  - {{ . }}
-                                {{- end }}
-                                {{- end }}
+                                # The destination is chosen by the EPP, not by
+                                # this config. That is the whole point of the
+                                # topology: routing is prefix-affinity-driven.
+                                cluster: original_destination_cluster
+                                timeout: 300s
+                                idle_timeout: 300s
                     http_filters:
+                      - name: envoy.filters.http.ext_proc
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
+                          grpc_service:
+                            envoy_grpc:
+                              cluster_name: ext_proc
+                              authority: provenance-epp.{{ .Release.Namespace }}:9002
+                            timeout: 10s
+                          # Fail CLOSED. An EPP that is down must produce a 5xx,
+                          # not a request that quietly bypasses the plugin: a
+                          # hardened run that silently degraded to unsalted
+                          # routing would publish the mitigation as working when
+                          # it was not running at all.
+                          failure_mode_allow: false
+                          processing_mode:
+                            request_header_mode: SEND
+                            response_header_mode: SEND
+                            request_body_mode: FULL_DUPLEX_STREAMED
+                            response_body_mode: FULL_DUPLEX_STREAMED
+                            request_trailer_mode: SEND
+                            response_trailer_mode: SEND
+                          message_timeout: 60s
                       - name: envoy.filters.http.router
                         typed_config:
                           "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
       clusters:
-        - name: sim
+        # Destination IP:port comes from the header the EPP sets on the request
+        # it returns. No static endpoint list: if the EPP does not pick, Envoy
+        # 503s, which is the loud failure this project prefers to a quiet one.
+        - name: original_destination_cluster
+          type: ORIGINAL_DST
+          connect_timeout: 30s
+          lb_policy: CLUSTER_PROVIDED
+          original_dst_lb_config:
+            use_http_header: true
+            http_header_name: x-gateway-destination-endpoint
+        - name: ext_proc
           type: STRICT_DNS
+          connect_timeout: 10s
+          lb_policy: LEAST_REQUEST
+          typed_extension_protocol_options:
+            envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+              "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+              explicit_http_config:
+                http2_protocol_options: {}
           load_assignment:
-            cluster_name: sim
+            cluster_name: ext_proc
             endpoints:
               - lb_endpoints:
                   - endpoint:
                       address:
-                        socket_address: { address: provenance-sim, port_value: 8000 }
+                        socket_address:
+                          address: provenance-epp.{{ .Release.Namespace }}
+                          port_value: 9002
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -67,7 +137,10 @@ spec:
     spec:
       containers:
         - name: envoy
-          image: envoyproxy/envoy:v1.31-latest
+          # Pinned, and pinned to >= 1.33: FULL_DUPLEX_STREAMED does not exist
+          # before it, and llm-d supports no other ext_proc body mode. This is
+          # the version llm-d's own e2e environments run.
+          image: docker.io/envoyproxy/envoy:distroless-v1.33.2
           args: ["-c", "/etc/envoy/envoy.yaml"]
           ports: [{ containerPort: 8080 }]
           volumeMounts:

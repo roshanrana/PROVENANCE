@@ -78,20 +78,46 @@ kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -
 echo
 echo "--> building the custom EPP image (ADR-002: our plugin + upstream runner)"
 pushd "$REPO_ROOT/barrier/epp" >/dev/null
-export KO_DOCKER_REPO="kind.local"
-export KIND_CLUSTER_NAME="$CLUSTER"
-# ko prints the image reference it produced on stdout, and that reference is the
-# ONLY thing that names the image it side-loaded into the cluster. Discarding it
-# and letting the chart's default (`provenance-epp:dev`) stand meant deploying an
-# image nobody had built — ImagePullBackOff, then a rollout that times out after
-# five minutes with no obvious cause. Captured and passed to helm below.
-EPP_IMAGE="$(ko build ./cmd/epp --bare --tags dev | tail -1)"
+
+# Built into the local Docker daemon (`ko.local`) and side-loaded with
+# `kind load docker-image`, NOT with ko's own `kind.local` publisher.
+#
+# `kind.local` was the obvious choice and it does not work on a multi-node
+# cluster here: ko loads the image, then runs `ctr images tag` on every node,
+# and on this three-node config the tag step failed on `provenance-worker` with
+# `image "kind.local:<digest>": not found` — the load had not reached that node.
+# CI run #4 died there after 2m40s of cluster build (F-20). `kind load
+# docker-image` is kind's own distribution path and handles every node.
+#
+# The tag is unique per run rather than a fixed `dev`. A mutable tag on a
+# side-loaded image is exactly the hazard ADR-008 names: a hardened deploy that
+# silently runs a stale default binary. With a tag nothing else can have
+# produced, `imagePullPolicy: IfNotPresent` cannot resolve to yesterday's build.
+EPP_TAG="epp-$(git rev-parse --short HEAD 2>/dev/null || echo nogit)-$(date -u +%s)"
+export KO_DOCKER_REPO="ko.local"
+ko build ./cmd/epp --bare --tags "$EPP_TAG" >/dev/null
+
+# The daemon is asked what ko named the image rather than the name being
+# predicted from the flags. ko's repository naming depends on --bare vs
+# --preserve-import-paths vs the ko.local defaults, and on stdout it prints a
+# *digest* reference, which `kind load docker-image` cannot take. The tag is
+# ours and unique, so looking it up is exact — and it fails here, with the
+# daemon's own list in the log, rather than five minutes later as an
+# ImagePullBackOff.
+# `|| true` because no match is a `grep` exit 1, and under `set -e` that would
+# abort here with no message — the empty-string check below is the diagnosis.
+EPP_IMAGE="$( { docker images --format '{{.Repository}}:{{.Tag}}' | grep -F ":$EPP_TAG" || true; } | sed -n 1p)"
 if [ -z "$EPP_IMAGE" ]; then
-  echo "MISSING: ko produced no image reference." >&2
+  echo "MISSING: ko produced no image tagged '$EPP_TAG' in the local daemon." >&2
+  echo "  images the daemon holds under ko.local:" >&2
+  docker images --format '  {{.Repository}}:{{.Tag}}' | grep -i '^  *ko' >&2 || true
   exit 4
 fi
-echo "    built: $EPP_IMAGE"
 popd >/dev/null
+
+echo "    built: $EPP_IMAGE"
+echo "--> side-loading it into every node of '$CLUSTER'"
+kind load docker-image "$EPP_IMAGE" --name "$CLUSTER"
 
 # --- secrets -----------------------------------------------------------------
 # Generated locally, gitignored, never printed. The salt secret in particular:

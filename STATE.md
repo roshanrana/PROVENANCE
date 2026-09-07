@@ -379,3 +379,47 @@ verified against the real `llm-d-router@v0.10.0` source — the overlay changes
 where modules are fetched from, not what they contain. The defect is in the
 repository's ability to build itself from a clean clone, which is exactly what a
 reviewer would try first.
+
+---
+
+## Finding F-20 — `ko`'s `kind.local` publisher cannot tag on a multi-node kind cluster
+
+Found 2026-09-07 from BARRIER CI run #4 (`fc3c08c`), which got past F-19 — the
+module resolved, the EPP compiled, the image built and loaded — and then died at
+2m40s into the bring-up step:
+
+```
+Loaded kind.local:a861e236…
+Adding tag dev
+Error: failed to publish images: … failed to tag image: command
+  "docker exec --privileged provenance-worker ctr --namespace=k8s.io images tag --force
+   kind.local:a861e236… kind.local:dev" failed with error: exit status 1
+ctr: image "kind.local:a861e236…": not found
+```
+
+`ko` with `KO_DOCKER_REPO=kind.local` loads the image and then runs `ctr images
+tag` on **every** node. `kind-config.yaml` asks for control-plane + two workers
+(deliberately — see the comment there), and the tag step ran on
+`provenance-worker` before, or without, the load reaching that node.
+
+**Fix.** Build into the local Docker daemon (`ko.local`) and distribute with
+`kind load docker-image`, which is kind's own path and handles every node. The
+tag is now unique per run — `epp-<short-sha>-<epoch>` — rather than a fixed
+`dev`: a mutable tag on a side-loaded image is precisely the ADR-008 hazard of a
+hardened deploy silently running a stale default binary, and
+`imagePullPolicy: IfNotPresent` cannot resolve a tag nothing else produced.
+
+`up.sh` no longer predicts the image name from the flags either. `ko` prints a
+*digest* reference on stdout, which `kind load docker-image` will not take, and
+its repository naming varies with `--bare` / `--preserve-import-paths` / the
+`ko.local` defaults. The script asks the daemon for the image carrying its own
+unique tag, and refuses — printing what the daemon does hold — if it is absent.
+
+**What it does not affect.** No published claim. This is the third defect in the
+deploy path found by running it rather than reading it (F-18, F-19, F-20), and
+none of the three could have been caught by `make check`.
+
+**Still behind it: F-18.** The chart puts no `ext_proc` filter in front of the
+simulator, so even a clean bring-up deploys an EPP that is never in the request
+path, and `default` and `hardened` would produce identical results. Run #5 going
+green is a bring-up result, not a spike result.

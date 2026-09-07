@@ -51,9 +51,17 @@ kind: ConfigMap
 metadata:
   name: provenance-epp-config
 data:
-  # The scheduling profile. This is the file the whole result turns on: the
+  # The EPP configuration. This is the file the whole result turns on: the
   # default profile has no tenant-salt plugin, the hardened one does.
+  #
+  # The apiVersion/kind envelope is not decoration — the runner decodes this as
+  # a typed EndpointPickerConfig and rejects a bare mapping, so without these two
+  # lines the EPP crash-loops before serving a single request (STATE.md F-21).
+  # `llm-d.ai/v1alpha1`, not the `inference.networking.x-k8s.io` group, which
+  # upstream deprecated in PR #972.
   config.yaml: |
+    apiVersion: llm-d.ai/v1alpha1
+    kind: EndpointPickerConfig
     {{- if .Values.plugins }}
     plugins:
     {{- toYaml .Values.plugins | nindent 6 }}

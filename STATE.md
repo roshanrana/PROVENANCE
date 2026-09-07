@@ -423,3 +423,42 @@ none of the three could have been caught by `make check`.
 simulator, so even a clean bring-up deploys an EPP that is never in the request
 path, and `default` and `hardened` would produce identical results. Run #5 going
 green is a bring-up result, not a spike result.
+
+---
+
+## Finding F-21 — the scheduling profile named a plugin that does not exist
+
+Found 2026-09-07 while wiring F-18, by reading llm-d's own shipped EPP configs
+(`config/charts/routerlib/templates/_config.yaml`, `deploy/config/dp-epp-config.yaml`)
+rather than by running anything. Three defects in the one file CLAUDE.md calls
+"the file the whole result turns on":
+
+1. **No `apiVersion` / `kind`.** The runner decodes this as a typed
+   `EndpointPickerConfig`; a bare mapping is rejected. The EPP would have
+   crash-looped before serving a request. The group is `llm-d.ai/v1alpha1` —
+   `inference.networking.x-k8s.io` was deprecated upstream in PR #972.
+
+2. **`least-queue-filter` does not exist.** Zero matches in llm-d-router at any
+   ref. It was invented, and it sat in both profiles as a `pluginRef`.
+
+3. **Nothing was declared.** `plugins:` DECLARES, `schedulingProfiles:`
+   composes. `values-default.yaml` had no `plugins:` block at all, so every
+   `pluginRef` in it was dangling. And `values-hardened.yaml` listed
+   `tenant-salt` as a scheduling `pluginRef` — but `TenantSalt` implements
+   `requestcontrol.RequestHeaderProcessor`, not a scheduling interface, so it is
+   activated by *declaration* and would have been rejected in a profile.
+
+**Fix.** Both profiles now declare `prefix-cache-scorer` and `queue-scorer` and
+compose them identically; hardened additionally declares `tenant-salt` outside
+the profile. The profiles being byte-identical is deliberate: the mitigation must
+change which namespace the hashes fall in, not how endpoints are scored, or the
+diff between the two runs stops being the mitigation.
+
+The unwired `routing.prefixCacheScorer.blockSize` / `maxPrefixBlocks` knobs are
+gone. No template ever read them, and configuration that looks live but is inert
+is the same class of defect as F-18.
+
+**What it does not affect.** No published claim. But note the shape: F-18, F-19,
+F-20 and F-21 are all in the deploy path, all invisible to `make check`, and
+three of the four were found by reading or running the thing rather than by any
+test this repository owns. That is the honest summary of BARRIER's maturity.

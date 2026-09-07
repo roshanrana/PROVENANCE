@@ -6,26 +6,17 @@
 #
 # Three changes, and all three are load-bearing (LLD §4.3).
 
-routing:
-  prefixCacheScorer:
-    enabled: true
-    blockSize: 16
-    maxPrefixBlocks: 256
-
-  schedulingProfiles:
-    - name: default
-      plugins:
-        # CHANGE 1 of 3 — derive the salt from authenticated identity.
-        #
-        # Placed before the producer so the hash chain is seeded with the derived
-        # value. Obligations 1 and 2 of LLD §4.3.
-        - pluginRef: tenant-salt
-        - pluginRef: approx-prefix-cache-producer
-        - pluginRef: prefix-cache-scorer
-          weight: 100
-        - pluginRef: least-queue-filter
-
+# CHANGE 1 of 3 — declare the tenant-salt plugin.
+#
+# It is a requestcontrol RequestHeaderProcessor, not a scheduling plugin, so it
+# belongs HERE and nowhere else: declaring it activates it, and it runs after
+# InferenceRequest creation but before any DataProducer computes prefix block
+# hashes. Naming it as a schedulingProfile `pluginRef` — which this file used to
+# do — is rejected at boot, because it implements no scheduling interface
+# (STATE.md F-21). Obligations 1 and 2 of LLD §4.3.
 plugins:
+  - type: prefix-cache-scorer
+  - type: queue-scorer
   - name: tenant-salt
     type: tenant-salt
     parameters:
@@ -48,6 +39,18 @@ plugins:
       # them with an empty salt. An empty salt puts the caller straight back into
       # the shared default namespace — silently, and looking like success.
       failClosed: true
+
+# Byte-identical to the default profile. That is deliberate: the mitigation must
+# not change how endpoints are scored, only what namespace the hashes fall in.
+# A profile diff here would confound the result.
+routing:
+  schedulingProfiles:
+    - name: default
+      plugins:
+        - pluginRef: prefix-cache-scorer
+          weight: 100
+        - pluginRef: queue-scorer
+          weight: 1
 
 proxy:
   # CHANGE 3 of 3 — the trust boundary (ADR-006).

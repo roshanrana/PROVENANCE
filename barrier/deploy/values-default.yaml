@@ -7,22 +7,30 @@
 #
 # Diff this against values-hardened.yaml. That diff is the deliverable.
 
-routing:
+# The EPP configuration. `plugins:` DECLARES; `schedulingProfiles:` composes.
+#
+# Both halves matter and only one of them used to be here. A profile that names
+# a pluginRef nothing declared is rejected at boot — and the earlier version of
+# this file also named `least-queue-filter`, which does not exist upstream at
+# all. See STATE.md F-21.
+plugins:
   # The approximate path: an EPP-local LRU index of the router's own routing
   # history. It leaks even after the engine has evicted the blocks, because it
   # remembers what was routed rather than what is cached (STATE.md F-01).
-  prefixCacheScorer:
-    enabled: true
-    blockSize: 16
-    maxPrefixBlocks: 256
+  - type: prefix-cache-scorer
+  # Declared so the profile is not prefix-affinity alone. A single-scorer
+  # profile would route purely on cache locality, which overstates the leak by
+  # removing every competing pressure a real deployment has.
+  - type: queue-scorer
 
+routing:
   schedulingProfiles:
     - name: default
       plugins:
-        - pluginRef: approx-prefix-cache-producer
         - pluginRef: prefix-cache-scorer
           weight: 100
-        - pluginRef: least-queue-filter
+        - pluginRef: queue-scorer
+          weight: 1
 
 # --- The gap -----------------------------------------------------------------
 #

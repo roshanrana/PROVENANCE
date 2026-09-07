@@ -1,7 +1,11 @@
 # Local runbook — everything that does not need a GPU
 
-Two jobs run entirely on a workstation with Docker. Between them they cover most
-of what was previously blocked on hardware this project does not have.
+Two jobs run entirely on a workstation with Docker. **Neither is on the critical
+path any more.** The BARRIER cluster stands up in GitHub Actions on every push,
+in both profiles, and runs S-02 and FR-B-03 there; the results are in
+`bench/results/` and settled in ADR-011 and ADR-012. This page is for a reviewer
+who would rather reproduce that locally than take CI's word for it, and for
+anyone changing the harness or the deployment and wanting a fast loop.
 
 Both are read-only with respect to your system: everything happens in
 containers, and nothing is installed on the host beyond the tools named below.
@@ -107,34 +111,57 @@ cd barrier/deploy/kind
 `bench/results/cluster-<profile>/up.log`. It was written on the assumption that
 nobody is watching it, so every step either succeeds loudly or fails loudly.
 
-### Then the spike that is actually blocking BARRIER
+### Then the two measurements, which are already answered
+
+Both run against the cluster you just brought up, and both have a published
+verdict you can check yours against.
 
 **S-02** asks whether an ordinary API caller can observe *anything* that
 distinguishes a cache hit from a miss. Its decision rule was fixed in advance
-(LLD §7) and travels inside the evidence file, so the result cannot be
+(LLD §7) and travels inside the evidence file, so the result could not be
 rationalised after the fact:
 
 ```bash
 uv run python -m barrier.attack.spike_s02 --base-url http://localhost:8080
 ```
 
-Both outcomes are publishable. If no client-observable signal exists on the
-simulator, that rescopes FR-B-03 to an instrumented demonstration — a finding,
-not a failure. **Its verdict must reach `docs/design/decisions.md` before any
-oracle code is written**, the same discipline as S-03 and the pre-registered
-statistics.
+**The answer is no** (ADR-011, CI run #12, n=402): latency AUC 0.5581, 95% CI
+[0.5026, 0.6138], p=0.0425 — which clears none of the three pre-registered
+thresholds. The positive control is what makes that negative mean something: the
+EPP's prefix index was consulted 404 times and matched on 402 of them. The router
+had something to leak and the client could not see it. FR-B-03 was rescoped to an
+operator-instrumented demonstration and the attacker-observable oracle moved to
+FR-B-09 on real vLLM, where it is still open. Raw output is in
+`bench/results/s02-run6-2026-09-07.md`.
+
+**FR-B-03** is that demonstration, and it runs against both profiles. In CI run
+#15, 40 trials per profile and n=80 per verdict: `default` probe match ratio
+1.0000 against a control of 0.0000, AUC 1.0000 [1.0000, 1.0000], p=9.999e-05,
+`attack_succeeds`; `hardened` probe 0.0000, AUC 0.5000, at chance (ADR-012,
+`bench/results/frb03-run15-2026-09-07.md`). Read the scope with the number: this
+is a **confirmation** oracle, not an extraction one. The probe sends the victim's
+prompt verbatim, so the perfect match is by construction. It shows a guessed
+prefix being confirmed, not unknown content being recovered.
+
+If your local `hardened` run does not come back at chance, the first thing to
+check is filter ordering: route-level header mutations run in Envoy's router
+filter, after `ext_proc`, so identity must be injected by
+`envoy.filters.http.header_mutation` placed **before** `ext_proc` or the plugin
+salts from whatever the client sent (F-27).
 
 ---
 
-## What still needs a GPU, and only this
+## What needed a GPU, and only this
 
-| | Why |
-|---|---|
-| ATTEST divergence + invariance | Batch-invariant kernels are CUDA/Triton; CPU unsupported |
-| The cost-of-determinism numbers | Same |
-| A-03's caching × determinism 2×2 | Same, plus SGLang's deterministic backends are all GPU |
+| | Why | Result |
+|---|---|---|
+| ATTEST divergence + invariance | Batch-invariant kernels are CUDA/Triton; CPU unsupported | 34 of 128 distinct logprob vectors at temperature 0; 5 of 128 remain under vLLM's batch-invariant mode, 1 of 128 under SGLang's |
+| The cost-of-determinism numbers | Same | 22.7% of throughput on vLLM, 95% CI [0.741, 0.808] |
+| A-03's caching × determinism 2×2 | Same, plus SGLang's deterministic backends are all GPU | 18.0% on SGLang, isolated from prefix caching, D/B ratio 0.820 |
 
-Everything else on this page runs on your desk for nothing.
+Those came from staged rented sessions on H100 and A40, about **$2.00** in total,
+with raw output committed under `bench/results/`. Everything else on this page
+runs on your desk for nothing.
 
 One caveat carried forward: on an Ampere or Ada card (A10, L4, A40, 4090)
 SGLang must use `--attention-backend triton`, because FA3 is Hopper-only. Triton

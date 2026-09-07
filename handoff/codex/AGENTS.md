@@ -1,5 +1,14 @@
 # PROVENANCE — Agent Instructions
 
+> **Resolution banner — historical record.** This is the Codex handoff pack's standing-rules
+> file, written for the Phase 4–5 implementation loop and kept unrewritten because it is the
+> record of the rules the build ran under. PROVENANCE has since shipped: phases 0–7
+> complete, all 50 planned tasks done, `make check` green at 308 Python tests and 22 Go
+> tests, both workstreams measured. Where the project stands now is `STATE.md` and
+> `docs/SHIP-REPORT.md`; the decisions that changed BARRIER's shape are ADR-011 and ADR-012
+> in `docs/design/decisions.md`, which now holds twelve ADRs; the numbers are in
+> `bench/results/`.
+
 Verifiable and tenant-isolated LLM inference for regulated environments. Two workstreams:
 **ATTEST** (inference reproducibility as a model-risk control) and **BARRIER** (KV-cache
 prefix locality as a cross-tenant leak, and its mitigation).
@@ -75,15 +84,17 @@ false confidence at the reviewer's expense.
 | Architecture + stack | `docs/design/02-hld.md` |
 | **Frozen contracts** | `docs/design/03-lld.md` §4 |
 | Task table + wave schedule | `docs/design/04-execution-plan.md` |
-| Codex build runbook | `docs/design/06-codex-runbook.md` |
-| Role prompts | `codex/roles/` |
+| Codex build runbook | `handoff/codex/RUNBOOK.md` |
+| Role prompts | `handoff/codex/roles/` |
 | Decisions (append-only) | `docs/design/decisions.md` |
 | Upstream facts (re-verify first) | `docs/design/00-upstream-findings.md` |
 | Task packs | `docs/tasks/T-###-*.md` |
 
 ## Toolchain
 
-Python 3.12 via **uv** — `uv run …`, never bare `python`. Go 1.24, confined to `barrier/epp`.
+Python 3.12 via **uv** — `uv run …`, never bare `python`. **Go 1.26.6**, confined to
+`barrier/epp` — llm-d-router v0.10.0 declares it and an older toolchain cannot resolve the
+module (ADR-008).
 `make check` runs both toolchains and must complete in under five minutes.
 
 ## What is not yours to run

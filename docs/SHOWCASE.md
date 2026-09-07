@@ -6,7 +6,7 @@ A guided tour of what the repository does, with the commands that show it. Nothi
 
 ```bash
 uv sync
-make check          # 250 tests, 93% coverage, about 40 seconds
+make check          # 318 Python tests and 22 Go tests, about 40 seconds
 make attest-demo    # one inference through the entire ATTEST pipeline
 make barrier-diff   # the mitigation, as a diff
 ```
@@ -61,10 +61,12 @@ What you will see:
 | `barrier/epp/plugin/plugin.go` | Registers with llm-d's exported plugin `Registry` and rewrites the outbound request so the salt reaches vLLM's own cache |
 | `barrier/epp/plugin/salt_test.go` | Derivation is deterministic per tenant, distinct across tenants, and cannot be supplied by the client |
 | `barrier/epp/cmd/epp/main.go` | A custom EPP binary that links the plugin without forking llm-d |
-| `barrier/attack/spike_s02.py` | The timing-oracle probe, written against the pre-registered decision rule |
+| `barrier/attack/spike_s02.py` | The timing-oracle probe, written against the pre-registered decision rule. Its verdict is that there is no client-observable oracle on the simulator: latency AUC 0.5581 [0.5026, 0.6138], p=0.0425, n=402, clearing none of the three thresholds (ADR-011, CI run #12) |
 | `barrier/deploy/values-default.yaml`, `values-hardened.yaml` | The two postures; `make barrier-diff` shows the difference |
 
 **Why it is interesting:** the finding was made by reading source. llm-d seeds its prefix hash with the model plus an optional client-supplied salt. The mitigation does not invent salting, which upstream already has; it makes the salt unforgeable and propagates it to vLLM's own cache, so both the routing index and the engine cache close together.
+
+**And it is measured, not asserted.** GitHub Actions stands up the two-tenant kind cluster on every push, in both profiles, and runs FR-B-03 against each. In CI run #15, 40 trials per profile and n=80 per verdict: the `default` profile's probe match ratio was 1.0000 against a control of 0.0000, AUC 1.0000 [1.0000, 1.0000], p=9.999e-05, `attack_succeeds`; the `hardened` profile's probe was 0.0000, AUC 0.5000, at chance (ADR-012). The scope matters and is stated wherever the number is: **this is a confirmation oracle, not an extraction one.** The probe sends the victim's prompt verbatim, so a perfect match is true by construction. It shows an attacker who can guess a prefix having that guess confirmed; it does not show that unknown content can be recovered.
 
 ### 5. The threat model (`docs/threat-model.md`)
 
@@ -73,16 +75,16 @@ Read it for the precise claim: a configuration and threat-model gap in the defau
 ## Things worth noticing
 
 - **Three assumptions in the original brief were overturned by reading source**, and each is recorded: `cache_salt` already exists; out-of-tree plugins work because `Register` and `Registry` are exported; the salt reaches vLLM's cache if the plugin rewrites the outbound body. Any one of these, missed, would have shipped a project that a reviewer familiar with llm-d could dismiss in thirty seconds.
-- **`bench/results/` is empty on purpose.** The README states that no measured number will appear until it traces to committed raw output plus the command and git SHA. The discipline is the deliverable.
-- **Negative results ship.** If small models do not diverge, that is the finding, at the same standard of evidence.
-- **Design-first with gates.** Requirements, HLD, LLD with frozen contracts and a fifty-task plan preceded the first line of code. `STATE.md` is the single source of truth for where the project stands.
+- **`bench/results/` holds seven runs, including the ones that were wrong.** The two GPU stages on A40 and H100, the SGLang 2×2, the GPU cost record, S-02's run, FR-B-03's run, and a hardened run whose trust-boundary claim a later run withdrew. Each file carries its command and git SHA, and the wrong ones were corrected in place by appending rather than replaced. No measured number appears anywhere else in this repository before it appears there.
+- **Negative results ship.** S-02 asked whether an ordinary caller can see a routing cache hit on the simulator and the answer was no — published as the result, with a positive control showing the EPP's prefix index matched on 402 of 404 lookups, so the negative is about observability rather than about an empty cache.
+- **Design-first with gates.** Requirements, HLD, LLD with frozen contracts and a fifty-task plan preceded the first line of code. `STATE.md` is the single source of truth for where the project stands, and carries 27 findings (F-01..F-27).
 
 ## Questions this project answers, and where
 
 | Question | Where the answer lives |
 |---|---|
 | How would you make an LLM's output reproducible enough for a model validator? | `attest/receipt/`, and the `VLLM_BATCH_INVARIANT` discussion in the README |
-| What does determinism cost a shared platform? | `attest/analysis/cost.py`; the number itself awaits a GPU session |
+| What does determinism cost a shared platform? | `attest/analysis/cost.py` and `bench/results/`: 18.0% of throughput on SGLang, isolated from prefix caching; 22.7% on vLLM, confounded with cache loss, 95% CI [0.741, 0.808] |
 | How could one tenant learn what another is asking a shared model? | `docs/threat-model.md` §3, the routing-index channel |
 | Why not just tell tenants to set `cache_salt`? | README, "BARRIER", and `barrier/epp/plugin/salt.go`: a control that can be omitted is not a control |
 | How do you change a platform's security posture without forking it? | `barrier/epp/cmd/epp/main.go` and `make barrier-diff` |

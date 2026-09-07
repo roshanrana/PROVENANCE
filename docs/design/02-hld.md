@@ -1,6 +1,17 @@
 # High-Level Design — PROVENANCE
 
-**Status:** draft · **Requirements:** `docs/design/01-requirements.md` (v0.2, approved 2026-08-29)
+> **Resolution banner — historical record.** This is the Phase 1 high-level design as it
+> stood before implementation. It is kept unrewritten: the architecture it proposes is what
+> was actually built, and where it guessed wrong the guess is worth more than a silent
+> correction. PROVENANCE has since shipped — phases 0–7 complete, `make check` green at 308
+> Python tests and 22 Go tests, both workstreams measured. The one structural change since:
+> SGLang joined as a second engine behind the `EngineClient` seam (ADR-009), and BARRIER's
+> client-observable oracle was rescoped to an operator-instrumented demonstration by
+> ADR-011 and then measured by ADR-012. Current state lives in `STATE.md`,
+> `docs/SHIP-REPORT.md`, ADR-011 and ADR-012 in `docs/design/decisions.md`, and
+> `bench/results/`.
+
+**Status:** approved at the Phase 1 gate, 2026-08-29 · **Requirements:** `docs/design/01-requirements.md` (v0.2, approved 2026-08-29)
 **Decisions log:** `docs/design/decisions.md` · **Date:** 2026-08-29
 
 ---
@@ -311,7 +322,9 @@ recorded in `decisions.md`.
 | Python only, plugin via config-only mitigation | One toolchain | Cannot ship FR-B-05 at all — the mitigation *is* Go |
 | Go only | One toolchain | vLLM harness in Go means fighting the ecosystem for no gain |
 
-**Recommendation: Python 3.12 + Go 1.24.** The split is imposed by the two upstreams, not
+**Recommendation: Python 3.12 + Go 1.26.6.** (Written as "Go 1.24" here; the pin moved to
+1.26.6 because llm-d-router v0.10.0 declares it and an older toolchain cannot resolve the
+module — ADR-008.) The split is imposed by the two upstreams, not
 chosen. Discipline is to keep the boundary at the process edge — Go produces a container
 image, Python produces CLIs, and they communicate only through files and HTTP. No cgo, no
 bindings, no shared build.
@@ -451,7 +464,7 @@ rules out keyless today. Key handling in §8.2.
 
 | Layer | Choice |
 |---|---|
-| Languages | Python 3.12, Go 1.24 |
+| Languages | Python 3.12, Go 1.26.6 (ADR-008) |
 | Python deps | uv + lockfile |
 | Python gates | ruff, mypy (strict on `common/`, `attest/receipt`) |
 | Statistics | numpy + scipy; AUC/bootstrap/permutation owned in `common/stats` |
@@ -555,9 +568,9 @@ prefix cache is pinned off for ATTEST** (D-06) and its state is recorded in ever
 
 | # | Risk | Mitigation |
 |---|---|---|
-| R-1 | **RSK-01** — no divergence at small model size | Staged GPU session with a human decision point (§6.1); NFR-17 makes the negative result shippable |
-| R-2 | **RSK-02** — simulator exposes no usable routing signal | Phase 2 spike S-02 before the LLD freezes; fallback to FR-B-09 on real vLLM |
-| R-3 | **A-09** — `cache_salt` may not reach vLLM's own prefix cache | Phase 2 spike; scope of FR-B-08 adjusts to what is measured. Does not affect the routing-index result |
+| R-1 | **RSK-01** — no divergence at small model size | Staged GPU session with a human decision point (§6.1); NFR-17 makes the negative result shippable. **Did not materialise:** 34 of 128 distinct logprob vectors at temperature 0 |
+| R-2 | **RSK-02** — simulator exposes no usable routing signal | Phase 2 spike S-02 before the LLD freezes; fallback to FR-B-09 on real vLLM. **Materialised, and the fallback was taken:** ADR-011 rescoped FR-B-03 to an operator-instrumented demonstration and moved the attacker-observable oracle to FR-B-09, still open |
+| R-3 | **A-09** — `cache_salt` may not reach vLLM's own prefix cache | Phase 2 spike; scope of FR-B-08 adjusts to what is measured. Does not affect the routing-index result. **Resolved affirmatively** by S-04/F-03 — one salt closes both channels (ADR-007) |
 | R-4 | Upstream runner API drift breaks the out-of-tree module | Pin the module version; `make check` compiles against the pin; upgrades are deliberate |
 | R-5 | Proxy cannot be configured to strip client headers | Would move the trust boundary; identified early because FR-B-02 requires the stripping config to exist before the attack runs |
 | R-6 | Two toolchains inflate CI beyond the 5-minute budget | Cache uv and Go module caches; keep the demo on the simulator; split `check` from the longer demo job if needed |

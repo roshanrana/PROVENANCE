@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="320" viewBox="0 0 720 320" role="img" aria-label="Distinct logprob vectors in 128 identical requests">
+  <title>Distinct logprob vectors in 128 identical requests</title>
+  <rect width="720" height="320" fill="#1a1a19"/>
+  <text x="24.0" y="30.0" font-family="ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" font-size="15" font-weight="600" fill="#ffffff" text-anchor="start">Batched inference is not reproducible at temperature 0</text>
+  <text x="24.0" y="50.0" font-family="ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">distinct logprob vectors in 128 identical requests — lower is better</text>
+  <text x="236.0" y="92.7" font-family="ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="end">vLLM, determinism off</text>
+  <rect x="250.0" y="74.0" width="380.0" height="26.0" rx="4.0" fill="#3987e5"/>
+  <text x="640.0" y="92.7" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="600" fill="#ffffff" text-anchor="start">34 of 128</text>
+  <text x="236.0" y="136.7" font-family="ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" font-size="12" font-weight="400" fill="#ffffff" text-anchor="end">vLLM, determinism on</text>
+  <rect x="250.0" y="118.0" width="55.9" height="26.0" rx="4.0" fill="#3987e5"/>
+  <text x="315.9" y="136.7" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="600" fill="#ffffff" text-anchor="start">5 of 128</text>
+  <text x="236.0" y="180.7" font-family="ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="end">SGLang, determinism off</text>
+  <rect x="250.0" y="162.0" width="33.5" height="26.0" rx="4.0" fill="#d95926"/>
+  <text x="293.5" y="180.7" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="600" fill="#ffffff" text-anchor="start">3 of 128</text>
+  <text x="236.0" y="224.7" font-family="ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" font-size="12" font-weight="400" fill="#ffffff" text-anchor="end">SGLang, determinism on</text>
+  <rect x="250.0" y="206.0" width="11.2" height="26.0" rx="4.0" fill="#d95926"/>
+  <text x="271.2" y="224.7" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" font-weight="600" fill="#ffffff" text-anchor="start">1 of 128</text>
+  <line x1="250.0" y1="254.0" x2="630.0" y2="254.0" stroke="#3a3a38" stroke-width="1"/>
+  <text x="24.0" y="284.0" font-family="ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" font-size="11" font-weight="400" fill="#c3c2b7" text-anchor="start">The two engines ran under their own defaults and schedulers.</text>
+  <text x="24.0" y="300.0" font-family="ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif" font-size="11" font-weight="400" fill="#c3c2b7" text-anchor="start">Read as two measurements, not as a controlled comparison.</text>
+</svg>

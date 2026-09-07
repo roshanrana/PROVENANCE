@@ -25,10 +25,11 @@
 
 | | |
 |---|---|
-| Tests | **308 Python + 22 Go passing** |
+| Tests | **318 Python + 22 Go passing** |
 | Gate | `make check` — format, lint, strict types, tests, Go build/vet/test |
 | ATTEST | **Determinism costs 18.0% of throughput** on SGLang, isolated from prefix caching; 22.7% on vLLM, confounded with it. Batched inference at temperature 0 produced 34 distinct logprob vectors in 128 identical requests; vLLM's batch-invariant mode leaves 5, SGLang's leaves 1. |
 | BARRIER | **The routing-index leak is real and the mitigation closes it.** Same schedule, same pre-registered rule: `default` AUC **1.0000** (p=9.999e-05, n=80), `hardened` AUC **0.5000**, at chance. ADR-012, CI run #15. |
+| Figures and inferences | **[`docs/RESULTS.md`](docs/RESULTS.md)** — every result with what it does and does not support |
 | Evidence | Runs in `bench/results/` **including the ones that were wrong** — two false-positive verdicts, an H100 result that was the opposite of the truth, and a claim about the trust boundary that a later run withdrew. |
 | Cost | Every GPU number: about **$2.00** of rented H100/A40. Every BARRIER number: **£0**, in public CI on every push. |
 
@@ -53,7 +54,7 @@ than in a footnote.
 | **The problem** | A regulated institution's shared LLM inference platform cannot reproduce its own outputs for a model validator, and its cache-aware router leaks which prefixes other tenants have used across an information barrier. |
 | **What it does** | ATTEST signed inference receipts, model identity binding to Hugging Face commits and weight digests, resumable measurement harness, pre-registered statistical decision rules, BARRIER tenant-salt threat model, llm-d EPP plugin, default-vs-hardened deployment diff. |
 | **Stack** | Python 3.12, uv, pytest, ruff, mypy, NumPy/SciPy, cryptography/ed25519, Go 1.26, vLLM, **SGLang**, llm-d, Kubernetes/kind, Helm-style manifests. |
-| **Validation** | `make check`, 308 Python + 22 Go tests, coverage gates, `make attest-demo`, receipt tamper tests, bootstrap/permutation/AUC tests, Go salt-derivation and salt-coverage tests compiled against real llm-d, CI mirror of local gates. The two-tenant kind topology and both deployment profiles are stood up on **every push**, and the FR-B-03 measurement runs with them. |
+| **Validation** | `make check`, 318 Python + 22 Go tests, coverage gates, `make attest-demo`, receipt tamper tests, bootstrap/permutation/AUC tests, Go salt-derivation and salt-coverage tests compiled against real llm-d, CI mirror of local gates. The two-tenant kind topology and both deployment profiles are stood up on **every push**, and the FR-B-03 measurement runs with them. |
 
 ---
 
@@ -90,6 +91,11 @@ Two findings, and the second is the one that took a second run to see.
 **Determinism costs about a quarter of your throughput** — 22.7%, with a
 confidence interval that excludes 1.0 — plus roughly 30% on median latency. This
 figure does not appear to be published anywhere.
+
+That number is **confounded**, and saying so is the point: vLLM cannot run
+batch-invariant with prefix caching on, so 22.7% is determinism *plus* the loss
+of the cache. Separating them needed a second engine, and the isolated figure is
+18.0% — see the SGLang decomposition below and `docs/RESULTS.md`.
 
 **Batch invariance is a large mitigation, not a guarantee.** It cuts divergence
 by ~85% at this configuration and does not eliminate it. An earlier run at 32
@@ -187,7 +193,7 @@ source at commit `30705c0`; not yet confirmed against a running engine
 
 ```bash
 uv sync
-make check          # 250 tests, ~40s
+make check          # 318 Python + 22 Go tests, ~60s
 make attest-demo    # the full ATTEST pipeline against a stub engine
 ```
 

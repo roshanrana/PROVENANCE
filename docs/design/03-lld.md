@@ -1,6 +1,18 @@
 # Low-Level Design — PROVENANCE
 
-**Status:** draft · **HLD:** `docs/design/02-hld.md` (approved 2026-08-29)
+> **Resolution banner — historical record.** This is the Phase 2 low-level design as it
+> stood at the gate, kept unrewritten because the contracts it froze, and the one it
+> deliberately left unfrozen, are the record of how the project handled an unknown.
+> PROVENANCE has since shipped — phases 0–7 complete, `make check` green at 308 Python
+> tests and 22 Go tests. What changed since: S-02 ran and came back negative (ADR-011, run
+> #12, n=402 — no client-observable oracle on the simulator), which rescoped FR-B-03 to an
+> operator-instrumented demonstration and froze §4.4 around that; the demonstration was
+> then measured (ADR-012, run #15 — default AUC 1.0000, hardened AUC 0.5000); and the
+> receipt predicate went v0.1 → v0.2 when SGLang was admitted as a second engine (ADR-009).
+> Current state lives in `STATE.md`, `docs/SHIP-REPORT.md`, ADR-011 and ADR-012 in
+> `docs/design/decisions.md`, and `bench/results/`.
+
+**Status:** approved at the Phase 2 gate, 2026-08-29 · **HLD:** `docs/design/02-hld.md` (approved 2026-08-29)
 **Requirements:** `01-requirements.md` v0.2 · **Date:** 2026-08-29
 
 > **Contracts in §4 are frozen on approval.** Changing one afterwards is a plan change:
@@ -11,6 +23,7 @@
 ## 0. Spike results
 
 Three spikes gated this document. Two are resolved; one needs a cluster and is scoped below.
+**All three are now resolved** — S-02 ran on the cluster and came back negative (ADR-011).
 
 ### S-04 — RESOLVED, and it strengthens the mitigation
 
@@ -49,7 +62,16 @@ upstream change. **Placement decision: strip at the proxy** (Envoy config in
 malformed. Defence at the boundary, plus a plugin that refuses to guess. Recorded as
 ADR-006.
 
-### S-02 — NARROWED, still requires a cluster *(blocks §4.4 only)*
+### S-02 — RESOLVED, negatively *(was: narrowed, blocking §4.4 only)*
+
+> **Outcome (ADR-011, CI run #12, n=402, with a positive control).** The spike ran and the
+> answer is no: there is no client-observable oracle on the simulator. The "honest early
+> read" three paragraphs down is exactly what happened — FR-B-03 became an
+> operator-instrumented demonstration, and the attacker-observable oracle moved entirely to
+> FR-B-09 on real vLLM, which is still open. The demonstration was then measured under the
+> pre-registered bar (ADR-012, run #15): default AUC 1.0000, p=9.999e-05, n=80; hardened
+> AUC 0.5000, at chance. The two-tenant kind topology now runs in CI on every push, in both
+> profiles. The text below is left as written.
 
 Source rules out the obvious signal: `x-gateway-destination-endpoint-served` is in
 `OutputInjectionHeaders` and is **stripped from the response**, so an ordinary caller does
@@ -112,7 +134,7 @@ provenance/
 │   │   │   ├── salt.go          # HMAC derivation
 │   │   │   └── config.go        # typed parameters
 │   │   └── .ko.yaml
-│   ├── attack/                  # C4 — oracle + classification  [pending S-02]
+│   ├── attack/                  # C4 — oracle + classification  [S-02 resolved: ADR-011]
 │   └── deploy/                  # C6
 │       ├── values-default.yaml  # the leaking configuration
 │       ├── values-hardened.yaml # the fix — this diff is the deliverable (ADR-004)
@@ -185,7 +207,12 @@ in-toto Statement v1 with a PROVENANCE predicate. Field names are frozen.
     "name": "inference-output",
     "digest": { "sha256": "<hex of canonical output token IDs>" }
   }],
-  "predicateType": "https://provenance.dev/attestation/v0.1",
+  "predicateType": "https://provenance.dev/attestation/v0.2",   // v0.1 as designed; bumped
+                                                                // when SGLang was admitted —
+                                                                // `vllm_version`/`batch_invariant`
+                                                                // became `engine_version`/
+                                                                // `deterministic` plus an
+                                                                // `engine` discriminator (ADR-009)
   "predicate": {
     "model": {
       "hub": "huggingface",
@@ -275,7 +302,13 @@ Three obligations, all contractual:
 with an empty salt. The permissive path is available for the *default* configuration only,
 because that is the configuration under attack.
 
-### 4.4 Attack oracle interface — **PENDING S-02**
+### 4.4 Attack oracle interface — **FROZEN; S-02 returned negative (ADR-011)**
+
+The spike found no client-observable signal, so the score function is the EPP's own
+prefix-index lookup outcome, observed by the operator — not by the attacker. The frozen
+part below held unchanged: the oracle hands `decide()` a `labels`/`scores` pair and the
+returned `Verdict` is published verbatim (ADR-012, run #15). The section as written at the
+gate follows.
 
 Deliberately unfrozen. The classifier's score function depends on what signal the spike
 finds. The contract that *is* frozen: whatever the oracle produces, it hands
@@ -342,7 +375,14 @@ and recorded HF Hub fixtures so `verify --online` is testable offline.
 
 ---
 
-## 7. S-02 spike — specification
+## 7. S-02 spike — specification *(executed; verdict in ADR-011)*
+
+> **Ran as specified.** CI run #12, n=402, positive control included. Step (1) yielded no
+> client-visible discriminator, so the decision rule at the foot of this section fired
+> exactly as written: FR-B-03 rescoped to the instrumented demonstration of step (3), the
+> attacker-observable oracle moved to FR-B-09 on real vLLM. The instrumented fallback found
+> the leak it was built to find — 402 of 404 EPP prefix-index lookups matched. The spec
+> below is unedited.
 
 Self-contained, runnable by Roshan, records its own output. This is the only thing blocking
 §4.4.
@@ -389,7 +429,9 @@ request path.
 ## 9. Migration and versioning
 
 No database, so no migrations. Two versioned surfaces: the receipt `predicateType`
-(`v0.1` → bump on any field change; verifiers must reject unknown majors) and the plugin
+(`v0.1` → bump on any field change; verifiers must reject unknown majors — this bumped to
+`v0.2` under ADR-009, and v0.1 receipts are refused by name; no receipt had been published,
+so nothing was invalidated) and the plugin
 `PluginType` config schema (additive changes only within a minor).
 
 `bench/results/` is append-only. A re-run creates a new `run-id`; results are never

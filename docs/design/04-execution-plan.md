@@ -1,6 +1,17 @@
 # Execution Plan — PROVENANCE
 
-**Status:** draft · **LLD:** `docs/design/03-lld.md` (approved 2026-08-29)
+> **Resolution banner — historical record.** This is the Phase 3 execution plan. It is kept
+> unrewritten because the schedule, the wave structure and the risks it carried are the
+> record of how the build was planned, not a report on how it went. All 50 tasks are now
+> complete — T-030 superseded by amendment task A-03, which subsumed it — and phases 0–7
+> are done. `make check` is green at 308 Python tests and 22 Go tests; the two-tenant kind
+> topology runs in CI on every push in both profiles. The two risks this document called
+> out at the top resolved in opposite directions: RSK-01 did not materialise, RSK-02 did
+> and was closed by ADR-011's rescope, which then measured through ADR-012. Current state
+> lives in `STATE.md`, `docs/SHIP-REPORT.md`, ADR-011 and ADR-012 in
+> `docs/design/decisions.md`, and `bench/results/`.
+
+**Status:** approved at the Phase 3 gate, 2026-08-29 · **LLD:** `docs/design/03-lld.md` (approved 2026-08-29)
 **Date:** 2026-08-29 · **50 tasks across 7 milestones**
 
 ---
@@ -33,56 +44,56 @@ Env: **C** = cloud container · **R** = Roshan's machine · **G** = rented GPU.
 
 | ID | Title | M | Wave | Depends on | Size | Env | Status |
 |---|---|---|---|---|---|---|---|
-| T-001 | Scaffold repo tree, uv workspace, pyproject | M0 | 1 | — | M | C | todo |
-| T-002 | Python quality gates: ruff, mypy, pytest config | M0 | 2 | T-001 | S | C | todo |
-| T-003 | Go module scaffold + golangci-lint for `barrier/epp` | M0 | 2 | T-001 | S | C | todo |
-| T-006 | `common/runid.py` — run-id and manifest construction | M0 | 2 | T-001 | S | C | todo |
-| T-008 | Stub vLLM engine test double | M0 | 2 | T-001 | M | C | todo |
-| T-009 | `attest/receipt/schema.py` — frozen predicate types | M0 | 2 | T-001 | S | C | todo |
-| T-004 | Single `make check` spanning both toolchains | M0 | 3 | T-002, T-003 | S | C | todo |
-| T-007 | `attest/harness/ledger.py` — cells.jsonl state machine | M0 | 3 | T-006 | M | C | todo |
-| T-010 | `attest/receipt/sign.py` — ed25519 + JCS canonicalisation | M0 | 3 | T-009 | M | C | todo |
-| T-005 | GitHub Actions CI running `make check` | M0 | 4 | T-004 | S | C | todo |
-| T-011 | `attest verify` CLI with full exit-code taxonomy | M0 | 4 | T-010 | M | C | todo |
-| T-012 | Walking skeleton: `make attest-demo` end to end | M0 | 5 | T-005, T-007, T-008, T-011 | M | C | todo |
-| T-013 | `common/stats/auc.py` — AUC + bootstrap CI | M1 | 6 | T-012 | M | C | todo |
-| T-014 | `common/stats/permutation.py` | M1 | 6 | T-012 | S | C | todo |
-| T-017 | `attest/harness/matrix.py` — pure matrix generation | M1 | 6 | T-012 | M | C | todo |
-| T-019 | `attest/receipt/provenance.py` — Hub identity resolution | M1 | 6 | T-012 | M | C | todo |
-| T-015 | `common/stats/decision.py` — Verdict, NFR-05 thresholds | M1 | 7 | T-013, T-014 | S | C | todo |
-| T-016 | `common/stats/noise.py` — noise floor, `required_trials` | M1 | 7 | T-013 | M | C | todo |
-| T-018 | `attest/harness/engine.py` — vLLM lifecycle + resolved config | M1 | 7 | T-017 | L | C | todo |
-| T-020 | `attest verify --online` (exit 5, 6) | M1 | 7 | T-019 | S | C | todo |
-| T-021 | `attest replay` | M1 | 8 | T-018, T-020 | M | C | todo |
-| T-024 | `common/traces/replay.py` — published-trace workload | M1 | 8 | T-016 | M | C | todo |
-| T-022 | Analysis: divergence table | M1 | 8 | T-017 | M | C | todo |
-| T-023 | Analysis: cost estimates with CIs | M1 | 9 | T-015, T-022 | M | C | todo |
-| T-025 | Stage-1 divergence-hunt runner | M1 | 9 | T-018, T-024 | M | C | todo |
-| T-026 | Stage-2 measured-matrix runner | M1 | 9 | T-025 | M | C | todo |
-| T-027 | GPU session rehearsal + time-budget validation | M2 | 10 | T-026 | M | C | todo |
-| T-028 | Execute staged GPU session | M2 | 11 | T-027 | L | **G** | todo |
-| T-029 | Analyse results, commit figures | M2 | 12 | T-028 | M | C | todo |
-| T-030 | APC × invariance secondary experiment | M2 | 12 | T-028 | M | C | todo |
-| T-031 | ATTEST writeup | M2 | 13 | T-029, T-030 | M | C | todo |
-| T-032 | kind wrapper over upstream `Makefile.kind.mk` | M3 | 6 | T-001 | M | **R** | todo |
-| T-033 | Default topology values: 2 tenants, 2 sim pods | M3 | 7 | T-032 | M | **R** | todo |
-| T-034 | Custom EPP module + `main.go` + ko build (no plugin logic) | M3 | 7 | T-003 | M | C | todo |
-| T-035 | **Execute S-02 spike**, record verdict | M3 | 8 | T-033, T-034 | M | **R** | todo |
-| T-036 | `docs/threat-model.md` | M3 | 8 | T-035 | M | C | todo |
-| T-037 | tenant-salt plugin: salt derivation + typed config | M4 | 9 | T-034 | M | C | todo |
-| T-038 | tenant-salt plugin: seed EPP prefix hash chain | M4 | 10 | T-037 | M | C | todo |
-| T-039 | tenant-salt plugin: rewrite outbound `cache_salt` (ADR-007) | M4 | 10 | T-037 | M | C | todo |
-| T-040 | Proxy header-stripping config (ADR-006) | M4 | 10 | T-033 | S | **R** | todo |
-| T-041 | `values-hardened.yaml` + committed rendered diff | M4 | 11 | T-038, T-039, T-040 | S | **R** | todo |
-| T-042 | Isolation cost: hit rate and TTFT p50/p99 | M4 | 12 | T-041 | M | **R** | todo |
-| T-043 | Oracle implementation | M5 | 12 | T-035, T-041 | L | **R** | todo |
-| T-044 | Attack variants: omission, forgery, negligence | M5 | 13 | T-043 | M | **R** | todo |
-| T-045 | Statistical evaluation, publish Verdict verbatim | M5 | 13 | T-015, T-044 | M | C | todo |
-| T-046 | BARRIER writeup | M5 | 14 | T-042, T-045 | M | C | todo |
-| T-047 | README (FR-R-02) | M6 | 14 | T-031, T-046 | M | C | todo |
-| T-048 | `docs/architecture.md` | M6 | 14 | T-036 | M | C | todo |
-| T-049 | Gate ladder: audits, coverage, secrets scan | M6 | 14 | T-005 | M | C | todo |
-| T-050 | `docs/ship-report.md` | M6 | 15 | all | M | C | todo |
+| T-001 | Scaffold repo tree, uv workspace, pyproject | M0 | 1 | — | M | C | done |
+| T-002 | Python quality gates: ruff, mypy, pytest config | M0 | 2 | T-001 | S | C | done |
+| T-003 | Go module scaffold + golangci-lint for `barrier/epp` | M0 | 2 | T-001 | S | C | done |
+| T-006 | `common/runid.py` — run-id and manifest construction | M0 | 2 | T-001 | S | C | done |
+| T-008 | Stub vLLM engine test double | M0 | 2 | T-001 | M | C | done |
+| T-009 | `attest/receipt/schema.py` — frozen predicate types | M0 | 2 | T-001 | S | C | done |
+| T-004 | Single `make check` spanning both toolchains | M0 | 3 | T-002, T-003 | S | C | done |
+| T-007 | `attest/harness/ledger.py` — cells.jsonl state machine | M0 | 3 | T-006 | M | C | done |
+| T-010 | `attest/receipt/sign.py` — ed25519 + JCS canonicalisation | M0 | 3 | T-009 | M | C | done |
+| T-005 | GitHub Actions CI running `make check` | M0 | 4 | T-004 | S | C | done |
+| T-011 | `attest verify` CLI with full exit-code taxonomy | M0 | 4 | T-010 | M | C | done |
+| T-012 | Walking skeleton: `make attest-demo` end to end | M0 | 5 | T-005, T-007, T-008, T-011 | M | C | done |
+| T-013 | `common/stats/auc.py` — AUC + bootstrap CI | M1 | 6 | T-012 | M | C | done |
+| T-014 | `common/stats/permutation.py` | M1 | 6 | T-012 | S | C | done |
+| T-017 | `attest/harness/matrix.py` — pure matrix generation | M1 | 6 | T-012 | M | C | done |
+| T-019 | `attest/receipt/provenance.py` — Hub identity resolution | M1 | 6 | T-012 | M | C | done |
+| T-015 | `common/stats/decision.py` — Verdict, NFR-05 thresholds | M1 | 7 | T-013, T-014 | S | C | done |
+| T-016 | `common/stats/noise.py` — noise floor, `required_trials` | M1 | 7 | T-013 | M | C | done |
+| T-018 | `attest/harness/engine.py` — vLLM lifecycle + resolved config | M1 | 7 | T-017 | L | C | done |
+| T-020 | `attest verify --online` (exit 5, 6) | M1 | 7 | T-019 | S | C | done |
+| T-021 | `attest replay` | M1 | 8 | T-018, T-020 | M | C | done |
+| T-024 | `common/traces/replay.py` — published-trace workload | M1 | 8 | T-016 | M | C | done |
+| T-022 | Analysis: divergence table | M1 | 8 | T-017 | M | C | done |
+| T-023 | Analysis: cost estimates with CIs | M1 | 9 | T-015, T-022 | M | C | done |
+| T-025 | Stage-1 divergence-hunt runner | M1 | 9 | T-018, T-024 | M | C | done |
+| T-026 | Stage-2 measured-matrix runner | M1 | 9 | T-025 | M | C | done |
+| T-027 | GPU session rehearsal + time-budget validation | M2 | 10 | T-026 | M | C | done |
+| T-028 | Execute staged GPU session | M2 | 11 | T-027 | L | **G** | done |
+| T-029 | Analyse results, commit figures | M2 | 12 | T-028 | M | C | done |
+| T-030 | APC × invariance secondary experiment | M2 | 12 | T-028 | M | C | superseded — A-03 |
+| T-031 | ATTEST writeup | M2 | 13 | T-029, T-030 | M | C | done |
+| T-032 | kind wrapper over upstream `Makefile.kind.mk` | M3 | 6 | T-001 | M | **R** | done |
+| T-033 | Default topology values: 2 tenants, 2 sim pods | M3 | 7 | T-032 | M | **R** | done |
+| T-034 | Custom EPP module + `main.go` + ko build (no plugin logic) | M3 | 7 | T-003 | M | C | done |
+| T-035 | **Execute S-02 spike**, record verdict | M3 | 8 | T-033, T-034 | M | **R** | done |
+| T-036 | `docs/threat-model.md` | M3 | 8 | T-035 | M | C | done |
+| T-037 | tenant-salt plugin: salt derivation + typed config | M4 | 9 | T-034 | M | C | done |
+| T-038 | tenant-salt plugin: seed EPP prefix hash chain | M4 | 10 | T-037 | M | C | done |
+| T-039 | tenant-salt plugin: rewrite outbound `cache_salt` (ADR-007) | M4 | 10 | T-037 | M | C | done |
+| T-040 | Proxy header-stripping config (ADR-006) | M4 | 10 | T-033 | S | **R** | done |
+| T-041 | `values-hardened.yaml` + committed rendered diff | M4 | 11 | T-038, T-039, T-040 | S | **R** | done |
+| T-042 | Isolation cost: hit rate and TTFT p50/p99 | M4 | 12 | T-041 | M | **R** | done |
+| T-043 | Oracle implementation | M5 | 12 | T-035, T-041 | L | **R** | done |
+| T-044 | Attack variants: omission, forgery, negligence | M5 | 13 | T-043 | M | **R** | done |
+| T-045 | Statistical evaluation, publish Verdict verbatim | M5 | 13 | T-015, T-044 | M | C | done |
+| T-046 | BARRIER writeup | M5 | 14 | T-042, T-045 | M | C | done |
+| T-047 | README (FR-R-02) | M6 | 14 | T-031, T-046 | M | C | done |
+| T-048 | `docs/architecture.md` | M6 | 14 | T-036 | M | C | done |
+| T-049 | Gate ladder: audits, coverage, secrets scan | M6 | 14 | T-005 | M | C | done |
+| T-050 | `docs/ship-report.md` | M6 | 15 | all | M | C | done |
 
 **Requirement coverage check.** Every FR maps to at least one task, and every task cites at
 least one requirement in its pack. Verified at this gate: FR-A-01→T-025/T-028,
@@ -108,7 +119,9 @@ Only the non-obvious edges.
   no logic yet — the spike measures the *stock* configuration, and building the image first
   proves the ko path before plugin work depends on it.
 - **T-043 → T-035.** The oracle's score function is LLD §4.4, which is unfrozen until the
-  spike returns. **T-043's pack cannot be written in full until T-035 completes.**
+  spike returns. **T-043's pack cannot be written in full until T-035 completes.** *T-035
+  completed and returned negative (ADR-011), so T-043's score function became the EPP's own
+  prefix-index lookup outcome, observed by the operator. Both tasks are done.*
 - **T-039 → ADR-007.** Rewriting the outbound body is a separate task from seeding the hash
   chain (T-038) because they touch different points in the request lifecycle and can fail
   independently. Splitting them keeps each diff small enough to review.
@@ -173,6 +186,15 @@ assumed.
 ---
 
 ## Top risks carried from the HLD
+
+> **All three resolved.** RSK-01 did not materialise — stage 1 diverged, and the measured
+> matrix returned 34 of 128 distinct logprob vectors at temperature 0. RSK-02 did
+> materialise: T-035 found no client-observable signal (ADR-011, run #12, n=402), and the
+> worst case described below is what was taken — FR-B-03 rescoped to an operator-instrumented
+> demonstration, the attacker-observable oracle moved to FR-B-09 on real vLLM, which is
+> still open. T-043 changed shape accordingly, was recorded as a plan amendment in
+> `decisions.md` rather than improvised, and is done; ADR-012 (run #15) measured it at AUC
+> 1.0000 default and 0.5000 hardened. The forecasts below are left as written.
 
 1. **RSK-01 — no divergence at 0.5B.** T-028's Stage 1 is a human decision point inside a
    scripted run. If nothing diverges, ATTEST's centre of gravity shifts to receipts and the

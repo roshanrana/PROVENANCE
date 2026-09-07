@@ -2,24 +2,43 @@
 
 **PROVENANCE** — verifiable and tenant-isolated LLM inference for regulated environments.
 
-This repository contains a **complete, approved design** and a 50-task execution plan. No
-application code has been written yet. Everything needed to begin implementation is here.
+This repository is **shipped**. Both workstreams have their headline result measured,
+`make check` is green at **318 Python and 22 Go tests**, and no number is published here
+that does not trace to raw output committed under `bench/results/`.
+
+Four places to start, in this order: `README.md` for the claims, `docs/SHIP-REPORT.md` for
+what is established and what is not, `bench/results/` for the seven runs behind both
+workstreams — including the ones that were wrong — and `docs/design/decisions.md` for the
+twelve ADRs that got there.
 
 ---
 
 ## What this project is
 
-A public portfolio project demonstrating operational expertise with **vLLM** and **llm-d**,
-framed for a regulated financial institution. Two workstreams, one repository, one thesis:
-*making distributed inference auditable and information-barrier-safe.*
+Operational work against **vLLM**, **SGLang** and **llm-d**, framed for a regulated
+financial institution. Two workstreams, one repository, one thesis: *making distributed
+inference auditable and information-barrier-safe.*
 
 - **ATTEST** — batched LLM inference is not deterministic; that breaks model-risk-management
-  expectations. Demonstrate the divergence, prove bitwise reproducibility under vLLM's
-  batch-invariant mode, quantify what determinism costs, and emit signed, replayable
-  attestation receipts.
+  expectations. Measured on rented H100/A40 for about **$2.00** total: at temperature 0,
+  128 identical requests produced **34 distinct logprob vectors**. vLLM's batch-invariant
+  mode leaves 5 of 128; SGLang's deterministic mode leaves 1. Determinism costs **18.0%**
+  of throughput on SGLang, isolated from prefix caching (D/B ratio 0.820), and **22.7%** on
+  vLLM, where it is confounded with cache loss (95% CI [0.741, 0.808]). Each inference can
+  carry a signed, replayable attestation receipt.
 - **BARRIER** — llm-d's prefix-cache-aware routing shares one cache namespace across tenants
-  by default. Demonstrate the cross-tenant channel, then close it with a real llm-d EPP
-  plugin that binds the cache salt to authenticated tenant identity.
+  by default. The channel is demonstrated and closed by a real, out-of-tree llm-d EPP plugin
+  that binds the cache salt to authenticated tenant identity. Measured in CI run #15
+  (ADR-012), 40 trials per profile, n=80 per verdict: the `default` profile's probe match
+  ratio is **1.0000** against a control of 0.0000, AUC **1.0000** [1.0000, 1.0000],
+  p=9.999e-05, `attack_succeeds`; the `hardened` profile's probe is 0.0000 against the same
+  control, AUC **0.5000**, at chance.
+
+**The BARRIER result is a confirmation oracle, not an extraction one.** The probe sends the
+victim's prompt verbatim, so a perfect match is true by construction. It shows that an
+attacker who can *guess* a prefix gets that guess confirmed by the routing layer. It does
+not show that unknown content can be recovered, and ADR-012 says so at the point of the
+claim.
 
 Read `provenance-project-brief.md` for the original framing, then
 `docs/design/01-requirements.md` for what was actually agreed.
@@ -30,16 +49,19 @@ Read `provenance-project-brief.md` for the original framing, then
 
 | # | Document | Why |
 |---|---|---|
-| 1 | `STATE.md` | Where the project is right now. **Always first.** |
-| 2 | `docs/design/00-upstream-findings.md` | What is true upstream, verified from source. **Re-verify before writing code** — both dependencies are beta. |
-| 3 | `docs/design/01-requirements.md` | 24 functional + 19 non-functional requirements, all with measurable targets. §2 holds 15 settled decisions. |
-| 4 | `docs/design/02-hld.md` | Architecture, 8 components, 4 critical flows, 11 stack recommendations. |
-| 5 | `docs/design/03-lld.md` | **§4 contains the frozen contracts.** Read this before writing anything. |
-| 6 | `docs/design/04-execution-plan.md` | 50 tasks, 7 milestones, 15 waves, dependency graph. |
-| 7 | `docs/design/06-codex-runbook.md` | How to actually run the build with Codex. |
-| 8 | `docs/design/decisions.md` | Seven ADRs. Read the *conclusions*; the debates are over. |
+| 1 | `STATE.md` | Where the project is right now, and 27 recorded findings (F-01..F-27). **Always first.** |
+| 2 | `docs/SHIP-REPORT.md` | What is claimed, what backs it, what went wrong, and what is not done. |
+| 3 | `bench/results/` | Seven result files, immutable, including the runs that were wrong and the reason attached to each. |
+| 4 | `docs/design/00-upstream-findings.md` | What is true upstream, verified from source. Both dependencies are beta; re-verify before changing code against them. |
+| 5 | `docs/design/01-requirements.md` | 24 functional + 19 non-functional requirements, all with measurable targets. §2 holds 15 settled decisions. |
+| 6 | `docs/design/02-hld.md` | Architecture, 8 components, 4 critical flows, 11 stack recommendations. |
+| 7 | `docs/design/03-lld.md` | **§4 contains the frozen contracts.** |
+| 8 | `docs/design/04-execution-plan.md` | 50 tasks, 7 milestones, 15 waves, dependency graph. |
+| 9 | `docs/design/decisions.md` | Twelve ADRs (ADR-001..ADR-012). Read the *conclusions*; the debates are over. |
 
-`AGENTS.md` carries the standing rules and is loaded into every agent automatically.
+`handoff/claude-code/RUNBOOK.md` and `handoff/codex/RUNBOOK.md` describe how the build was
+actually driven — profiles, roles, the wave loop, verification routing. `AGENTS.md` carries
+the standing rules and is loaded into every agent automatically.
 
 ---
 
@@ -57,52 +79,43 @@ Read these before forming your own view — each overturned an assumption in the
    the routing index and the real KV cache — provided the plugin rewrites the outbound
    request body. See §F-03 and ADR-007.
 
----
-
-## Beginning implementation
-
-1. **Re-verify** `docs/design/00-upstream-findings.md` and update its date stamp (NFR-19).
-2. **Wave 1 is `T-001` alone** — it scaffolds the tree every other task writes into. Run it
-   by itself; do not parallelise it.
-3. **Wave 2** is five tasks with disjoint file scopes: `T-002`, `T-003`, `T-006`, `T-008`,
-   `T-009`. This is where parallelism starts paying.
-4. **M0 gate** at Wave 5: `make check` green *and* `make attest-demo` green in CI — one stub
-   inference travelling the full pipeline, no GPU and no cluster required.
-
-Full mechanics — profiles, roles, the wave loop, verification routing — are in
-`docs/design/06-codex-runbook.md`.
+A fourth was found late and is the sharpest: **Envoy applies route-level header mutations in
+the router filter, after `ext_proc`**, so route-level identity injection never reached the
+EPP and a profile labelled `hardened` was reading a client-supplied identity — the exact
+forgery ADR-006 exists to close. The EPP is wired to Envoy via `ext_proc`, and the trust
+boundary works because `envoy.filters.http.header_mutation` is placed as a real HTTP filter
+**before** it. See §F-27.
 
 ---
 
-## What no agent can run
+## What ran where
 
-Nine tasks need hardware that must stay with Roshan:
+The two-tenant BARRIER kind cluster stands up in **GitHub Actions CI on every push, in both
+profiles** — `default` and `hardened` — running S-02 and FR-B-03 with it. That costs £0. A
+reviewer who wants to run it locally instead can: see `docs/RUNBOOK-local.md`.
 
-- **Local kind cluster** (Docker Desktop, confirmed present): T-032, T-033, T-035, T-040,
-  T-041, T-042, T-043, T-044
-- **Rented NVIDIA GPU**, one staged 4–6 hour session, SM ≥ 8.0: T-028
-
-ATTEST cannot run on the development machine at all — vLLM's batch invariance requires an
-NVIDIA GPU of compute capability 8.0 or higher; AMD is untested upstream and CPU is
-unsupported. Every ATTEST measurement comes from that one rented session, which is why
-`T-008` builds a stub engine: it lets the entire pipeline be developed and tested with no
-GPU, so integration bugs surface cheaply instead of on rented hardware.
-
-Packs for those tasks produce **self-contained scripts that record their own output** into
-`bench/results/`. Write the script; hand it over; read the result.
+ATTEST cannot run on a development machine at all — batch invariance requires an NVIDIA GPU
+of compute capability 8.0 or higher; AMD is untested upstream and CPU is unsupported. Every
+ATTEST measurement comes from staged rented sessions on H100 and A40, six pods for roughly
+**$2.00** in total, and each run's raw output is committed under `bench/results/`. The stub
+engine (`tests/support/stub_engine.py`) is what made that cheap: the whole pipeline was
+developed and tested with no GPU, so integration bugs surfaced before the meter started.
 
 ---
 
-## The two risks that are still open
+## The two risks the design carried
 
-- **RSK-01** — divergence may not appear at Qwen2.5-0.5B. The GPU session is staged with a
-  human decision point for exactly this reason. If nothing diverges, that becomes the
-  published result and ATTEST's centre of gravity shifts to receipts and the APC
-  non-composition finding. Requirements are written so either outcome ships.
-- **RSK-02** — the llm-d simulator may expose no client-observable routing signal, since
-  `x-gateway-destination-endpoint-served` is stripped from responses. `T-035` answers this,
-  and the decision rule is already written down in LLD §7 — applied as written, not
-  reinterpreted after seeing the result.
+Both are closed.
+
+- **RSK-01** — divergence might not have appeared at small model size. It did: 34 of 128
+  distinct logprob vectors at temperature 0, and the invariance and cost numbers followed.
+- **RSK-02** — the llm-d simulator might expose no client-observable routing signal. It does
+  not. S-02 is **resolved** (ADR-011, CI run #12, n=402): latency AUC 0.5581 [0.5026, 0.6138],
+  p=0.0425, which does not clear the pre-registered bar, against a positive control showing
+  the EPP's prefix index matched on 402 of 404 lookups. The router had something to leak and
+  the client could not see it. FR-B-03 was therefore rescoped to an operator-instrumented
+  demonstration, and the attacker-observable oracle moved to **FR-B-09 on real vLLM**, which
+  is still open.
 
 ---
 

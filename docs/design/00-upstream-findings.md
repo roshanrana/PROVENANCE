@@ -1,5 +1,16 @@
 # 00 — Upstream Verification Findings
 
+> **Resolution banner — historical record.** This is the pre-design upstream verification
+> pass, dated 2026-08-28, kept unrewritten because it is the snapshot the whole design was
+> reasoned from and because a document about stale facts should show its own date rather
+> than quietly refresh. PROVENANCE has since shipped: phases 0–7 complete, `make check`
+> green at 308 Python tests and 22 Go tests. Two things here were later extended rather
+> than contradicted — SGLang was added as a second engine (ADR-009, ADR-010, and
+> `docs/design/07-amendment-sglang.md`), and the Go pin moved to 1.26.6 because
+> llm-d-router v0.10.0 declares it (ADR-008). What upstream now looks like *as measured*,
+> rather than as read, is in `bench/results/`, `docs/SHIP-REPORT.md` and `STATE.md`;
+> decisions are in `docs/design/decisions.md`, which now holds twelve ADRs.
+
 **Date of verification:** 2026-08-28
 **Purpose:** The project brief was written from a snapshot. Before any design work, verify
 the API surfaces both workstreams depend on. This document records what is true upstream

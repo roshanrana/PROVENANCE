@@ -9,7 +9,7 @@ crawl or `git log` archaeology — this file exists so that is never necessary.
 ## Now
 
 - **Phase:** 7 — shipped. Both workstreams have their headline result measured.
-- **Gate:** `make check` green — 308 Python, 22 Go. CI stands up the two-tenant
+- **Gate:** `make check` green — 318 Python, 22 Go. CI stands up the two-tenant
   kind topology in **both profiles on every push** and runs S-02 and FR-B-03 with it.
 - **Blocked on:** nothing.
 
@@ -235,6 +235,7 @@ None.
 
 `make check`: ruff, ruff-format, mypy strict, **272 Python tests** — all pass.
 Go: `go build ./...`, `go vet ./...` clean and **20 tests** passing on Go 1.26.6.
+*(Counts as of that session. Current: 318 Python, 22 Go — see the Now block at the top.)*
 The `go-check` Makefile target still fails *in this container only*, because it
 invokes the system Go, which tries to fetch the pinned toolchain through the
 blocked proxy. On a machine with normal egress it is correct as written.

@@ -1,6 +1,15 @@
 # 05 — Orchestration Runbook
 
-**Status:** draft · **Date:** 2026-08-29
+> **Resolution banner — historical record.** This runbook governed the Phase 4–5
+> implementation loop and the phases after it. It is kept unrewritten because the process it
+> describes is what the build actually ran, and the reasoning behind each lever is the useful
+> part. PROVENANCE has since shipped: phases 0–7 complete, all 50 planned tasks done, `make
+> check` green at 308 Python tests and 22 Go tests. Nothing here is a live instruction any
+> more — the current state is `STATE.md` and `docs/SHIP-REPORT.md`, the decisions are in
+> `docs/design/decisions.md` (twelve ADRs, of which ADR-011 and ADR-012 changed BARRIER's
+> shape), and the numbers are in `bench/results/`.
+
+**Status:** approved at the Phase 3 gate, 2026-08-29 · **Date:** 2026-08-29
 **Governs:** Phase 5 (implementation loop) and every later phase run with multiple agents.
 
 How PROVENANCE is built with an Opus orchestrator directing Sonnet workers, and how context

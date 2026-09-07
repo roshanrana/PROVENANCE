@@ -17,7 +17,7 @@ produced it.
 |---|---|---|
 | Batched inference at temperature 0 is not reproducible | 34 of 128 distinct logprob vectors, H100 | **Measured** |
 | vLLM's batch invariance reduces but does not eliminate it | 5 of 128 remain | **Measured** |
-| Determinism costs 22.7% throughput on vLLM | 95% CI [0.741, 0.808], n=128/arm | **Measured, with interval** |
+| Determinism costs 22.7% throughput on vLLM, **confounded** with the prefix cache it forces off | 95% CI [0.741, 0.808], n=128/arm | **Measured, with interval — and see the row below, which is the unconfounded figure** |
 | Determinism costs 18.0% on SGLang, isolated from caching | D/B = 0.820× | **Measured, point estimate** |
 | SGLang's deterministic mode *does* eliminate divergence | 1 of 128, cache on and off | **Measured** |
 | `cache_salt` exists upstream and is unenforced | vLLM + llm-d source | **Verified by source read** |
@@ -70,7 +70,7 @@ check ended up as tested code rather than a shell one-liner.
 ## 3. Gates
 
 ```
-make check   ruff · ruff format · mypy strict · 287 pytest · Go build/vet/test (22)
+make check   ruff · ruff format · mypy strict · 318 pytest · Go build/vet/test (22)
 ```
 
 Green. The Go gate fails in the cloud container only, because it invokes the

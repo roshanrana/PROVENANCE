@@ -22,7 +22,7 @@ PROVENANCE addresses both, as two workstreams that share a statistics library an
 
 ATTEST turns "we cannot reproduce it" into "here is the receipt."
 
-vLLM ships batch-invariant kernels (`VLLM_BATCH_INVARIANT=1`) that make output independent of batch composition. The flag is engine-wide, so one caller who needs determinism imposes its cost on everyone. Nobody appears to have published what that cost is.
+vLLM ships batch-invariant kernels (`VLLM_BATCH_INVARIANT=1`) that make output independent of batch composition. The flag is engine-wide, so one caller who needs determinism imposes its cost on everyone. Nobody appears to have published what that cost is; this project measured it, on rented H100/A40 for about $2.00 in total.
 
 ATTEST does four things:
 
@@ -43,15 +43,17 @@ The mitigation binds the salt to **authenticated tenant identity** so it cannot 
 
 It ships as a **registered, out-of-tree llm-d EPP scheduler plugin**. No fork. The difference between `values-default.yaml` and `values-hardened.yaml` is three lines, and that small diff is the argument: a real gap in the default posture closes with one plugin and one proxy rule.
 
+The EPP is wired to Envoy over `ext_proc`, and the proxy rule has to sit in the right place to work at all. Route-level header mutations run in Envoy's router filter, which is *after* `ext_proc`, so an earlier version of the hardened profile was salting from an identity the client had supplied — the exact forgery the design exists to close. The trust boundary holds because `envoy.filters.http.header_mutation` is a real HTTP filter placed **before** `ext_proc`. That is finding F-27, and it was caught by an instrument that deliberately withholds the header under test.
+
 ## Why the statistics are in the repository
 
 BARRIER's success criteria were pre-registered before any attack code existed. The bar is AUC ≥ 0.75 with a bootstrap 95% confidence interval excluding 0.5 and a permutation-test *p* < 0.01 for the attack, and a confidence interval containing 0.5 for the mitigation. The git history shows the ordering.
 
 AUC, bootstrap and permutation are implemented in `common/stats/` rather than imported, not for lack of a library but so that a reviewer assessing whether a security claim holds can read the decision rule in forty lines. The bootstrap is calibration-tested: over two hundred null datasets, a nominal 95% interval contains the truth about 95% of the time, or the test fails.
 
-If divergence does not appear at small model sizes, that becomes the published result, with the same rigour. The requirements are written so that either outcome ships.
+The rule was then applied as written, including where it returned an answer nobody wanted. S-02 asked whether an ordinary caller can observe anything that distinguishes a routing cache hit from a miss on the llm-d simulator. It cannot: latency AUC 0.5581 with a 95% interval of [0.5026, 0.6138] and p=0.0425, n=402, which clears none of the three pre-registered thresholds. That is published as the result (ADR-011, CI run #12) rather than re-run until it looked better, and it rescoped FR-B-03 to an operator-instrumented demonstration, moving the attacker-observable oracle to FR-B-09 on real vLLM, where it remains open.
 
-## What has been demonstrated, and what needs hardware
+## What has been demonstrated, and what has not
 
 | Claim | Status | Evidence |
 |---|---|---|
@@ -59,11 +61,15 @@ If divergence does not appear at small model sizes, that becomes the published r
 | Statistical decision rules and their calibration | Demonstrated | `common/stats/` tests, including the 200-dataset bootstrap calibration |
 | Tenant-salt derivation and plugin registration | Demonstrated | Go tests in `barrier/epp/` |
 | Default-vs-hardened deployment diff | Demonstrated | `make barrier-diff` |
-| Batch-composition divergence and cost of determinism | **Needs one NVIDIA GPU** (compute capability ≥ 8.0) | Batch invariance is CUDA/Triton; the harness is written and resumable |
-| Two-tenant cluster topology | Needs Docker and kind, no GPU | Simulator-backed llm-d deployment |
-| Timing-oracle measurement | **Needs real vLLM on a GPU** | The llm-d simulator does not vary time-to-first-token on cache hits |
+| Batch-composition divergence | **Measured** | 34 of 128 distinct logprob vectors at temperature 0; 5 of 128 remain under vLLM's batch-invariant mode, 1 of 128 under SGLang's deterministic mode |
+| Cost of determinism | **Measured** | 18.0% of throughput on SGLang, isolated from prefix caching (D/B ratio 0.820); 22.7% on vLLM, confounded with cache loss, 95% CI [0.741, 0.808] |
+| Two-tenant cluster topology, both profiles | **Stood up on every push** | GitHub Actions CI brings up the simulator-backed llm-d deployment in `default` and `hardened` and runs S-02 and FR-B-03 against it, for £0 |
+| The routing index leaks across tenants, and the tenant salt closes it | **Measured** | ADR-012, CI run #15, 40 trials per profile, n=80 per verdict: `default` probe match ratio 1.0000 vs control 0.0000, AUC 1.0000 [1.0000, 1.0000], p=9.999e-05; `hardened` probe 0.0000, AUC 0.5000, at chance |
+| A client-observable routing oracle on the simulator | **Measured, and there is none** | ADR-011, CI run #12, n=402: latency AUC 0.5581 [0.5026, 0.6138], p=0.0425, clearing no pre-registered threshold |
+| A client-observable timing oracle on real vLLM | **Open** | FR-B-09. The simulator does not vary time-to-first-token on cache hits, so it cannot answer the question |
+| Recovery of unknown victim content | **Not claimed** | The measured attack is a confirmation oracle: the probe sends the victim's prompt verbatim, so the perfect match is by construction. It shows a guessed prefix being confirmed, nothing more |
 
-No headline number appears anywhere in this repository until it traces to committed raw output plus the command and git SHA that produced it. `bench/results/` is where such numbers will live, and it is empty by design until they exist.
+No headline number appears anywhere in this repository until it traces to committed raw output plus the command and git SHA that produced it. `bench/results/` holds seven such files — the GPU stages on A40 and H100, the SGLang 2×2, the GPU cost record, S-02's run, the hardened run whose trust-boundary claim was later withdrawn, and FR-B-03's — kept immutable, including the runs that were wrong, each with the reason attached.
 
 ## Architecture in one screen
 
@@ -85,7 +91,9 @@ PROVENANCE is the infrastructure layer beneath the application-level projects. [
 
 ## Further reading
 
+- [`SHIP-REPORT.md`](SHIP-REPORT.md): what is claimed, what backs it, the fourteen defects and what caught each, and what is still not done
 - [`threat-model.md`](threat-model.md): the attacker, the assets, and the channels
+- [`design/decisions.md`](design/decisions.md): twelve ADRs, including ADR-011 and ADR-012, which settle BARRIER's two measurements
 - [`design/`](design/): requirements, high-level design, low-level design with frozen contracts, execution plan
 - [`design/00-upstream-findings.md`](design/00-upstream-findings.md): what reading llm-d and vLLM source overturned in the original brief
 - Prior art engaged with directly: [PrefixWall / CacheSolidarity](https://arxiv.org/abs/2603.10726) and [DualMap](https://arxiv.org/abs/2602.06502)

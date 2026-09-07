@@ -1,7 +1,19 @@
 # 01 — Requirements
 
+> **Resolution banner — historical record.** This is the Phase 0 requirements document as
+> it stood before anything was built, kept unrewritten because the record of what was
+> planned is worth more than a document retrofitted to match what shipped. PROVENANCE has
+> since shipped: phases 0–7 complete, `make check` green at 308 Python tests and 22 Go
+> tests. Both headline results are measured — determinism costs 18.0% on SGLang isolated
+> and 22.7% on vLLM confounded; the routing-index leak reaches AUC 1.0000 and the tenant
+> salt puts it back at 0.5000. FR-B-03 was rescoped by ADR-011 after S-02 found no
+> client-observable oracle on the simulator, and then measured under that rescope by
+> ADR-012. Current state lives in `STATE.md`, `docs/SHIP-REPORT.md`, ADR-011 and ADR-012 in
+> `docs/design/decisions.md`, and `bench/results/`. Specific forecasts below are annotated
+> where they were wrong; none are deleted.
+
 **Project:** PROVENANCE — verifiable and tenant-isolated LLM inference for regulated environments
-**Phase:** 0 (intake) · **Status:** awaiting approval · **Revision:** v0.2
+**Phase:** 0 (intake) · **Status:** approved at the Phase 0 gate, 2026-08-29 · **Revision:** v0.2
 **Inputs:** `provenance-project-brief.md`, `docs/design/00-upstream-findings.md`, `STATE.md` §F-01
 **Date:** 2026-08-29
 
@@ -119,7 +131,7 @@ MVP is the gate for going public; the extension is the deepening pass.
 |---|---|---|
 | FR-B-01 | Document a threat model before any attack code is written. | `docs/threat-model.md` defines tenants, trust boundaries, attacker capabilities and observations, the security property claimed, and what is explicitly not defended against. **Must state that `cache_salt` exists upstream and characterise precisely what its client-supplied nature does and does not protect.** Reviewed at the Phase 2 gate. |
 | FR-B-02 | Deploy a reproducible multi-tenant llm-d topology locally. | Helm values / manifests bringing up an llm-d Router plus ≥2 simulator-backed model-server pods, ≥2 tenants, on kind. **Builds on upstream `Makefile.kind.mk` rather than hand-rolling.** No GPU. |
-| FR-B-03 | Implement a membership oracle against the default configuration. | An attacker process holding only tenant-A credentials classifies whether a given prefix was recently submitted by tenant B, using only observations available to an ordinary API caller. |
+| FR-B-03 | Implement a membership oracle against the default configuration. | *Original criterion, as written at intake:* an attacker process holding only tenant-A credentials classifies whether a given prefix was recently submitted by tenant B, using only observations available to an ordinary API caller. **Rescoped by ADR-011** (S-02, CI run #12, n=402): the simulator exposes no client-observable routing signal, so the "ordinary API caller" clause is unsatisfiable there. **Current criterion:** an operator-instrumented demonstration — the EPP's own prefix-index lookups classify whether a prefix was recently submitted by the other tenant, at the pre-registered bar, with the same statistics. The attacker-observable oracle moved in full to FR-B-09 on real vLLM, which is still open. Measured under the new criterion by ADR-012 (run #15): default AUC 1.0000, p=9.999e-05, n=80; hardened AUC 0.5000. |
 | FR-B-04 | Report attack success with pre-registered statistics. | AUC with bootstrap 95% CI and a permutation-test p-value, against NFR-05. Test committed before results are collected. |
 | FR-B-05 | **Bind the prefix cache salt to authenticated tenant identity**, as a real llm-d EPP plugin. | A registered Go plugin, configured through standard `schedulingProfiles` YAML, that derives the salt from the authenticated tenant identity at the gateway and **overrides any client-supplied `cache_salt`**, so the salt cannot be omitted, forged, or replayed. Cache locality is preserved within a tenant and structurally unavailable across tenants. (D-14) |
 | FR-B-06 | Demonstrate all three failure modes of the stock control, and their closure. | Against the default config: (a) **omission** — attacker sends no salt and shares the honest tenant's namespace; (b) **forgery** — attacker supplies a known or guessed victim salt; (c) **negligence** — an honest tenant who never sets a salt is unprotected. Against the hardened config, all three yield AUC 95% CI containing 0.5 at equal trial count. |
@@ -214,7 +226,7 @@ is recorded rather than rediscovered. (D-15)
 
 | Environment | Has | Does |
 |---|---|---|
-| **Cloud container** (agent) | Go 1.24.7, Python 3.11, uv, git, network. Docker client but **no daemon** | Source reading, Go plugin development and unit tests, Python harness and analysis development, document authoring, all `make check` work that needs no cluster |
+| **Cloud container** (agent) | Go 1.26.6 (built from source per ADR-008 — the stock 1.24.7 could not resolve llm-d-router v0.10.0), Python 3.11, uv, git, network. Docker client but **no daemon** | Source reading, Go plugin development and unit tests, Python harness and analysis development, document authoring, all `make check` work that needs no cluster |
 | **Roshan's machine** | Docker Desktop, kind, the connected repo folder | All cluster bring-up, the BARRIER demo, integration runs. Agent writes scripts and manifests into the folder; Roshan executes; output lands back in the folder and the agent reads it |
 | **Rented GPU** | NVIDIA SM ≥ 8.0 | ATTEST measured runs only, one staged session (§7.1) |
 
@@ -234,16 +246,21 @@ configured in either agent environment, so the first push is Roshan's). HF write
 | ID | Assumption | Status |
 |---|---|---|
 | A-01 | `VLLM_BATCH_INVARIANT=1` produces bitwise-identical output across batch shapes on supported hardware. | [V] |
-| A-02 | Qwen2.5-0.5B-Instruct exhibits observable divergence with invariance off under adversarial batching. | **[U] — RSK-01** |
+| A-02 | Qwen2.5-0.5B-Instruct exhibits observable divergence with invariance off under adversarial batching. | **[R]** — affirmative. Divergence measured: 34 of 128 distinct logprob vectors at temperature 0. RSK-01 did not materialise. |
 | A-03 | The approximate prefix index is not tenant-scoped by default. | **[R]** — confirmed: seeded with `TargetModel` + optional client `cache_salt` only |
-| A-04 | Routing decisions are observable enough to a tenant-scoped caller to build a membership oracle on the simulator. | **[U] — RSK-02** |
-| A-05 | A custom scorer/producer plugin can be registered without forking llm-d Router. | [U] — plugin tree located; factory signature still to read (S-01) |
-| A-06 | A 4-hour matrix fits an L4/A10 at the chosen model size. | [U] — validated by the Phase 3 dry run |
+| A-04 | Routing decisions are observable enough to a tenant-scoped caller to build a membership oracle on the simulator. | **[R] — negatively.** Routing decisions are *not* observable to a tenant-scoped caller: the destination header is stripped and endpoint scores go to Envoy metadata. ADR-011, run #12, n=402, with a positive control. This is what rescoped FR-B-03. |
+| A-05 | A custom scorer/producer plugin can be registered without forking llm-d Router. | **[R]** — affirmative, by S-01 / F-02. Out-of-tree module, no fork (ADR-002). |
+| A-06 | A 4-hour matrix fits an L4/A10 at the chosen model size. | **[R]** — the measured matrix ran on rented H100/A40 time for roughly $2.00 of GPU. |
 | A-07 | Docker Desktop available for kind. | **[R]** — confirmed present and running |
-| A-08 | The tenant identity needed to derive a salt is available to an EPP plugin at scheduling time. | **[U] — RSK-05** |
-| A-09 | `cache_salt` propagates to the engine's own prefix cache, not only the EPP index. | **[U]** — determines the scope of FR-B-08; spike in Phase 2 |
+| A-08 | The tenant identity needed to derive a salt is available to an EPP plugin at scheduling time. | **[R]** — affirmative, by run #15 / F-27. The proxy-injected identity reaches the plugin; FR-B-03 sends no identity header of its own and is served. RSK-05 did not force a move. |
+| A-09 | `cache_salt` propagates to the engine's own prefix cache, not only the EPP index. | **[R]** — affirmative, by S-04 / F-03. Strengthens the mitigation to a third obligation (ADR-007). |
 
 ### 7.1 RSK-01 — ATTEST's divergence may not appear at 0.5B *(highest project risk)*
+
+> **Did not materialise.** Stage 1 showed divergence, which authorised the spend, and the
+> measured matrix returned 34 of 128 distinct logprob vectors at temperature 0 — 5
+> remaining under vLLM's batch invariance, 1 under SGLang's. The staging below worked as
+> designed; the fallback it describes was never needed. The forecast is left as written.
 
 Published demonstrations used substantially larger models with long generations. A 0.5B
 model at short context may not diverge observably, collapsing FR-A-01 while leaving
@@ -267,6 +284,12 @@ this outcome ships rather than becoming a crisis.
 
 ### 7.2 RSK-02 — the simulator may not expose enough signal for the oracle
 
+> **Materialised, and was resolved by the rescope this section anticipates.** S-02 ran as a
+> spike (ADR-011, run #12, n=402): no client-observable oracle exists on the simulator.
+> FR-B-03 became an operator-instrumented demonstration and the attacker-observable oracle
+> moved to FR-B-09 on real vLLM, which remains open. The demonstration was then measured —
+> ADR-012, run #15 — at AUC 1.0000 default and 0.5000 hardened.
+
 D-01 removed TTFT as usable simulator signal. The oracle must be built on what remains
 observable — which pod served the request, and any header, metric, or response
 characteristic revealing routing. If none of that is visible to an ordinary tenant caller,
@@ -285,6 +308,10 @@ at the start of Phase 4.
 **Mitigation:** NFR-18. Stop and escalate. Nothing published.
 
 ### 7.5 RSK-05 — tenant identity may not reach the scheduling layer *(new)*
+
+> **Did not materialise.** Identity is stripped at the proxy and re-injected there
+> (ADR-006), and run #15 established that the injected identity reaches the plugin — the
+> claim withdrawn and then re-established as F-27. FR-B-05 stayed where the LLD put it.
 
 FR-B-05 assumes an EPP plugin can obtain an authenticated tenant identity at scheduling
 time. If identity terminates at the proxy and is not propagated to the EPP, the salt
@@ -330,10 +357,12 @@ task, or a task with no requirement, is a defect in the plan, caught at the Phas
 Nothing blocking. Three items to note rather than decide now:
 
 1. **RSK-01 cannot be resolved by design work.** It resolves on GPU hardware in Stage 1.
-   The requirements are written so either outcome ships.
+   The requirements are written so either outcome ships. *(Resolved: it diverged — §7.1.)*
 2. **A-04, A-05, A-08 and A-09 resolve by reading llm-d source and probing the topology in
    Phase 2**, not by further documentation search. They are scheduled as spikes, and the
-   LLD does not freeze BARRIER's contracts until they return.
+   LLD does not freeze BARRIER's contracts until they return. *(All four returned: A-05 by
+   F-02, A-09 by F-03/ADR-007, A-08 by run #15/F-27, and A-04 negatively by ADR-011 — see
+   §7 for each.)*
 3. **FR-R-07 and FR-R-08 are impressive-tier and deliberately deferred.** They should not
    compete with ATTEST MVP for attention. Only D-12's provenance change lands early,
    because it alters a contract.

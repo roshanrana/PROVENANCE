@@ -1,13 +1,22 @@
 # 06 — Codex Build Runbook
 
-**Status:** draft · **Date:** 2026-08-29
+> **Resolution banner — historical record.** This runbook governed the Phase 4–5
+> implementation loop. It is kept unrewritten because the process it describes is what the
+> build actually ran, and the reasoning behind each lever is the useful part. PROVENANCE has
+> since shipped: phases 0–7 complete, all 50 planned tasks done, `make check` green at 308
+> Python tests and 22 Go tests. Nothing here is a live instruction any more — the current
+> state is `STATE.md` and `docs/SHIP-REPORT.md`, the decisions are in
+> `docs/design/decisions.md` (twelve ADRs, of which ADR-011 and ADR-012 changed BARRIER's
+> shape), and the numbers are in `bench/results/`.
+
+**Status:** approved at the Phase 3 gate, 2026-08-29 · **Date:** 2026-08-29
 **Governs:** Phase 4 onward, run with OpenAI Codex.
 
 How PROVENANCE gets built with Codex CLI: roles, profiles, the wave loop, and how context is
 kept small enough that quality does not decay across 50 tasks.
 
-Companion to `05-orchestration.md`, which describes the same division of labour for Claude
-Code. The roles are identical; only the mechanism differs.
+Companion to `handoff/claude-code/RUNBOOK.md`, which describes the same division of labour
+for Claude Code. The roles are identical; only the mechanism differs.
 
 ---
 
@@ -20,7 +29,7 @@ equivalent of a `.claude/agents/*.md` file that binds a role to a model. What it
 |---|---|
 | Standing project rules, auto-loaded | `AGENTS.md` at the git root |
 | Per-role reasoning effort | **Named profiles** in `~/.codex/config.toml` |
-| Per-role behaviour | **Role prompt files** in `codex/roles/`, prepended to the dispatch |
+| Per-role behaviour | **Role prompt files** in `handoff/codex/roles/`, prepended to the dispatch |
 | Structural isolation | `sandbox_mode` per profile — read-only for verifiers |
 | Context isolation between tasks | **A fresh session per task.** This is manual, and it matters. |
 
@@ -42,7 +51,7 @@ transfer unchanged.
 | `verifier-critical` | `verifier-critical` | xhigh | **read-only** | Contracts, statistics, cryptography, the security plugin. |
 | `spike` | `spike` | high | workspace-write | Investigations whose output freezes contracts. |
 
-Setup: merge `codex/config.toml.example` into `~/.codex/config.toml`.
+Setup: merge `handoff/codex/config.toml.example` into `~/.codex/config.toml`.
 
 **Read-only for verifiers is deliberate.** It is not a precaution — it is what makes the role
 real. A verifier that *can* fix what it is judging eventually will, and then nothing
@@ -84,10 +93,10 @@ Per task — each arrow is a **new session**:
 ```
 orchestrator ──► pick next unblocked task in wave; confirm pack is fresh
      │
-     ├─► codex --profile worker    + codex/roles/worker.md    + "Implement docs/tasks/T-002-….md"
+     ├─► codex --profile worker    + handoff/codex/roles/worker.md    + "Implement docs/tasks/T-002-….md"
      │        └──► diff + Handoff notes
      │
-     ├─► codex --profile verifier  + codex/roles/verifier.md  + "Verify T-002 against its pack"
+     ├─► codex --profile verifier  + handoff/codex/roles/verifier.md  + "Verify T-002 against its pack"
      │        └──► per-criterion PASS/FAIL
      │
      └─► orchestrator: merge · run gates · update STATE.md + task table · commit "T-002: …"
@@ -121,7 +130,7 @@ codex --profile worker   # T-008  docs/tasks/T-008-stub-engine.md
 codex --profile worker   # T-009  docs/tasks/T-009-receipt-schema.md
 ```
 
-Each dispatch is `codex/roles/worker.md` followed by one line naming the pack. Nothing more.
+Each dispatch is `handoff/codex/roles/worker.md` followed by one line naming the pack. Nothing more.
 
 **One writer per file, ever.** If two ready tasks overlap on a file, serialise them or
 re-split the plan. Never run them concurrently and hope. Because Codex has no worktree
@@ -176,7 +185,7 @@ You should never need to read a diff to know where the project stands.
 
 ## 8. Before the first dispatch
 
-1. **Merge `codex/config.toml.example`** into `~/.codex/config.toml`; confirm
+1. **Merge `handoff/codex/config.toml.example`** into `~/.codex/config.toml`; confirm
    `codex --profile worker` resolves.
 2. **`git init`, commit, and push** to your remote.
 3. **Re-verify `docs/design/00-upstream-findings.md`** and update its date stamp — NFR-19

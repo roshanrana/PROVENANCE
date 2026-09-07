@@ -1,5 +1,14 @@
 # PROVENANCE
 
+> **Resolution banner — historical record.** This is the Claude Code handoff pack's
+> standing-rules file as it was written for the Phase 4–5 implementation loop. It is kept
+> unrewritten because it is the record of the rules the build actually ran under.
+> PROVENANCE has since shipped: phases 0–7 complete, `make check` green at 308 Python tests
+> and 22 Go tests, both workstreams measured. Where the project stands now is `STATE.md`
+> and `docs/SHIP-REPORT.md`; the two decisions that changed BARRIER's shape are ADR-011 and
+> ADR-012 in `docs/design/decisions.md`; the numbers are in `bench/results/`. The live copy
+> of this file is `CLAUDE.md` at the repository root.
+
 Verifiable and tenant-isolated LLM inference for regulated environments. Two workstreams:
 **ATTEST** (inference reproducibility as a model-risk control) and **BARRIER** (KV-cache
 prefix locality as a cross-tenant leak, and its mitigation).
@@ -46,11 +55,13 @@ fails to show the expected effect is a finding, not an embarrassment.
 | Architecture + stack | `docs/design/02-hld.md` |
 | **Frozen contracts** | `docs/design/03-lld.md` §4 |
 | Task table + waves | `docs/design/04-execution-plan.md` |
-| Orchestration runbook | `docs/design/05-orchestration.md` |
+| Orchestration runbook | `handoff/claude-code/RUNBOOK.md` |
 | Decisions (append-only) | `docs/design/decisions.md` |
 | Task packs | `docs/tasks/T-###-*.md` |
 
 ## Toolchain
 
-Python 3.12 via **uv** (`uv run …`, never bare `python`). Go 1.24 in `barrier/epp` only.
+Python 3.12 via **uv** (`uv run …`, never bare `python`). **Go 1.26.6** in `barrier/epp`
+only — llm-d-router v0.10.0 declares it and an older toolchain cannot resolve the module
+(ADR-008).
 `make check` runs both. Commit messages start with the task ID: `T-014: add …`.

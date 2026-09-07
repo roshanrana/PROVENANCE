@@ -1,7 +1,17 @@
 # Amendment A-01 — adding SGLang
 
+> **Resolution banner — historical record.** This is the amendment as argued, kept
+> unrewritten because it is a record of a scope request being reasoned about rather than
+> waved through. The amendment was accepted and its narrow version has since run to
+> completion. PROVENANCE shipped: phases 0–7 complete, `make check` green at 308 Python
+> tests and 22 Go tests. The decomposition §1 argues for was measured — determinism costs
+> **18.0% on SGLang, isolated from caching**, against 22.7% on vLLM where the two are
+> confounded, and SGLang's deterministic mode leaves 1 distinct logprob vector of 128 where
+> vLLM's invariance leaves 5. Current state lives in `STATE.md`, `docs/SHIP-REPORT.md`,
+> ADR-011 and ADR-012 in `docs/design/decisions.md`, and `bench/results/`.
+
 **Status:** ACCEPTED 2026-09-07, per the recommendation in §6. See ADR-009 and ADR-010.
-**Outcome:** S-03, A-01 and A-02 are done; A-03 is held behind T-028's decision point; A-04 shrank (S-03 came back affirmative) and A-05 is backlogged. Progress is tracked in `docs/design/04-execution-plan.md`.
+**Outcome:** S-03, A-01, A-02 and **A-03** are done — A-03 ran on rented GPU time and its numbers are in `bench/results/sglang-2x2-h100-2026-09-07.md`; A-04 shrank (S-03 came back affirmative) and A-05 is backlogged. Progress is tracked in `docs/design/04-execution-plan.md`.
 **Raised:** 2026-09-07, mid-build, against an approved plan.
 **Affects:** 01-requirements (D-06, FR set), 02-hld §7, 04-execution-plan (new tasks), decisions.md.
 
@@ -201,6 +211,15 @@ endpoint, and say which were used — the same standard already applied to vLLM.
 ---
 
 ## 5. The case against
+
+> **RESOLVED (2026-09-07, post-build).** Point 1 is no longer true: BARRIER has run. The
+> two-tenant kind topology stands up in CI on every push in both profiles, S-02 executed
+> (ADR-011, run #12, n=402) and the attack produced data (ADR-012, run #15 — default AUC
+> 1.0000, p=9.999e-05, n=80; hardened AUC 0.5000). Point 2 held in principle and cost
+> little in practice: the whole 2×2 ran on roughly $2.00 of rented GPU. Points 3 and 4 were
+> answered by doing what they demanded — the decomposition is the result, and the SGLang
+> arm is measured, not described. The argument below is left as written, because it is the
+> reason the amendment was taken narrowly rather than whole, and that was the right call.
 
 Worth stating properly, because it is not weak.
 

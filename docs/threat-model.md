@@ -1,6 +1,6 @@
 # BARRIER — Threat Model
 
-**Status:** draft · **Satisfies:** FR-B-01 · **Date:** 2026-08-30
+**Status:** current — the channel it describes has since been measured (ADR-012) · **Satisfies:** FR-B-01 · **Date:** 2026-08-30, §6.3 updated 2026-09-07
 **Reviewed against:** `docs/design/03-lld.md` §4.3, ADR-006, ADR-007
 
 Written before the attack code, deliberately. A threat model produced after the
@@ -120,6 +120,15 @@ sent (ADR-006). That stripping is not hardening around the mitigation — it is 
 of the mitigation. Without it the identity header is attacker-controlled and the
 plugin is deriving a salt from a value the attacker chose.
 
+**And where it is applied matters as much as that it is applied.** Envoy runs
+route-level header mutations in the router filter, at the end of the chain, after
+`ext_proc` — so a route-level strip-and-inject is invisible to the EPP, and the
+plugin reads the request exactly as the client sent it. That is finding F-27, and
+it ran inside a profile labelled `hardened` until an instrument that deliberately
+withholds the identity header caught it. The boundary works because the
+strip-and-overwrite is `envoy.filters.http.header_mutation`, a real HTTP filter
+placed **before** `ext_proc`.
+
 ---
 
 ## 4. The attacker
@@ -189,12 +198,28 @@ eviction, so shorter-lived.
 | TTFT hit vs miss | **No** — the simulator does not vary TTFT on cache hits (D-01, issue #347 closed as not-planned) | Yes |
 | `x-gateway-destination-endpoint-served` | **No** — in `OutputInjectionHeaders`, stripped from responses (`handlers/response.go:202`) | No |
 | Endpoint scores | **No** — `--emit-endpoint-scores` writes to Envoy dynamic metadata, not to the client | No |
-| Anything else | **Open — this is spike S-02** | — |
+| Anything else | **No** — spike S-02, closed (ADR-011) | — |
 
-llm-d's own hygiene here is good, and it is why S-02 is a real question rather
-than a formality. If the answer is "nothing", FR-B-03 becomes an
-operator-instrumented demonstration and the attacker-observable oracle moves to
-real vLLM (LLD §7, decision rule fixed in advance).
+llm-d's own hygiene here is good, and it is why S-02 was a real question rather
+than a formality. It is now answered: **nothing an ordinary caller can see
+distinguishes a hit from a miss on the simulator.** CI run #12, n=402, judged by
+the rule fixed in LLD §7 before any attack code existed: latency AUC 0.5581, 95%
+CI [0.5026, 0.6138], p=0.0425, which clears none of the three thresholds. The
+positive control is what makes the negative informative — the EPP's prefix index
+was consulted 404 times and matched on 402 — so this is a result about
+observability, not about a cluster where nothing was cached.
+
+Per LLD §7, applied as written: FR-B-03 became an operator-instrumented
+demonstration, and the attacker-observable oracle moved to FR-B-09 on real vLLM,
+where TTFT does vary with cache state. That remains open. What FR-B-03 then
+measured (ADR-012, CI run #15, 40 trials per profile, n=80 per verdict) is the
+routing-index channel of §6.1 seen from the EPP's own index: `default` probe
+match ratio 1.0000 against a control of 0.0000, AUC 1.0000 [1.0000, 1.0000],
+p=9.999e-05; `hardened` probe 0.0000, AUC 0.5000, at chance. It is a
+**confirmation** oracle and nothing wider: the probe sends the victim's prompt
+verbatim, so the perfect match is by construction, and it demonstrates the goal
+stated in §4 — an attacker who can guess a prefix gets the guess confirmed — not
+the recovery of unknown content.
 
 ---
 

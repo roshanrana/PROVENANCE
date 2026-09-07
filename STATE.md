@@ -234,3 +234,53 @@ published, so nothing was invalidated.
 3. **T-028** GPU session, staged stage 1 → human decision → stage 2. **A-03**
    (the caching × determinism 2×2) is now an explicit stage-2 option; it is not
    scheduled, and if stage 1 shows no divergence at 0.5B it is moot.
+
+---
+
+## Session 2026-09-07 (later) — five GPU runs, four measured results
+
+### What is now measured
+
+| | result | evidence |
+|---|---|---|
+| Divergence exists | 34 of 128 distinct outputs at temp 0 | `bench/results/stage1-a40-2026-09-07.md`, `cost-h100-…` |
+| vLLM invariance | cuts it to 5 of 128 — **reduces, does not eliminate** | `bench/results/cost-h100-2026-09-07.md` |
+| vLLM cost | **22.7%** throughput, 95% CI [0.741, 0.808] | same |
+| SGLang invariance | **1 of 128 — eliminates**, cache on or off | `bench/results/sglang-2x2-h100-2026-09-07.md` |
+| SGLang cost, isolated | **18.0%**, cache held off both sides | same |
+| Cache worth (this workload) | **−7.9%** — a penalty, not a benefit | same |
+
+### Findings
+
+- **F-13 — the run driver would have mislabelled half of stage 2.** It attaches
+  to one engine; `batch_invariant` is read at vLLM import time. Fixed by a guard
+  that refuses a cell the live engine cannot serve.
+- **F-14 — that guard had the bug it was written to prevent.** It read
+  `/_stub/resolved_config`, an endpoint only the test stub implements, so
+  against real vLLM it returned "could not compare" and permitted the exact
+  mislabelled comparison it existed to stop. An entire H100 run reported the
+  opposite of the truth. It now fails closed. **Its tests passed because its
+  tests used the stub that implements the endpoint.**
+- **F-15 — the first "invariance fixes it" result was underpowered.** 32 trials
+  could not see a residual that appears at ~4 in 128. Amended in place, not
+  deleted.
+- **F-16 — the confounded cost number understates rather than inflates.** 0.848×
+  naive against 0.820× isolated, because the radix cache is a small penalty on a
+  short shared prompt and the two effects partly cancel. The opposite of the
+  intuition A-01 was written on.
+- **F-17 — `token_ids` and `/server_info` were both wrong against real vLLM**
+  (T-018a). Found by reading vLLM's source, before spending a GPU minute.
+
+### Cost
+
+Six pods, roughly **$2.00** of a $20 budget. Every failure was caught by a
+number that made no sense — a 32-trial cell finishing in zero seconds, twice.
+
+### Still open, and none of it needs rented hardware
+
+1. **S-02 and the two-tenant topology.** Docker Desktop on `monster`; see
+   `docs/RUNBOOK-local.md`. The verdict must reach `decisions.md` before any
+   oracle code exists. This is the last substantial unmeasured claim.
+2. **A-05** — two-engine llm-d topology in the kind chart. Backlog, needs (1).
+3. Confidence intervals on the A-03 2×2; SGLang's Triton backend; dependence on
+   model size and batch shape; why vLLM's 5 residual vectors remain.

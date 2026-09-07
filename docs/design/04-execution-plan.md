@@ -216,7 +216,7 @@ Every item runs in the environment that is otherwise idle waiting on hardware.
 | T-038a | Fix `ApplySalt`: `TokenizedPrompt`, and the missing `Generate` variant | container | S | **DONE** — `ec00137` |
 | A-01 | `attest/harness/sglang.py` — lifecycle, readback, refusals | container | M | **DONE** |
 | A-02 | Generalise `EngineState` over an engine discriminator; predicate v0.2 | container | S | **DONE** |
-| A-03 | The caching × determinism 2×2, both engines, one model | **GPU** | L | **Held** — stage-2 option under T-028's existing decision point |
+| A-03 | The caching × determinism 2×2, both engines, one model | **GPU** | L | **DONE** — `bench/results/sglang-2x2-h100-2026-09-07.md` |
 | A-04 | Test that the derived salt reaches the engine as `cache_salt` on the pre-tokenized path; threat-model paragraph on the `extra_key` trap | container | S | **DONE** |
 | A-05 | Two-engine llm-d topology in the kind chart | cluster | M | Backlog |
 
@@ -224,7 +224,12 @@ Every item runs in the environment that is otherwise idle waiting on hardware.
 to whatever field SGLang uses"; SGLang uses `cache_salt`, the same field, so the mitigation
 needs no change and what remains is an assertion plus a documented trap.
 
-**A-03 is deliberately not scheduled.** T-028 is already staged stage 1 → human decision →
+**A-03 ran, and the decision point worked as designed.** Stage 1 on an A40 showed
+divergence, which is what authorised the spend; had it not, the 2×2 would have been moot
+and the hours saved. The original note follows, unedited, because the reasoning is the
+point and it held.
+
+**A-03 was deliberately not scheduled.** T-028 is already staged stage 1 → human decision →
 stage 2. If stage 1 shows no divergence at 0.5B, the 2×2 is moot and the hours are saved;
 adding it as a stage-2 option costs nothing until that decision is taken. Any A-03 run must
 pin the SGLang version and endpoint, because `sgl-project/sglang#15481` reports seeded

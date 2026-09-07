@@ -21,7 +21,7 @@
 
 ## Status
 
-**Design complete and approved. ATTEST built and tested. BARRIER built and compiling, not yet deployed.**
+**ATTEST measured and published. BARRIER built and compiling, never deployed.**
 
 | | |
 |---|---|
@@ -293,6 +293,8 @@ SaaS in the reproduction path.
 
 | | |
 |---|---|
+| [`docs/SHIP-REPORT.md`](docs/SHIP-REPORT.md) | What is claimed, what backs it, what went wrong and what caught it |
+| [`bench/results/`](bench/results/) | Every measured run — including the one that was wrong and the one that was underpowered |
 | [`docs/OVERVIEW.md`](docs/OVERVIEW.md) | The setting, the two workstreams, what is demonstrated and what needs hardware |
 | [`docs/SHOWCASE.md`](docs/SHOWCASE.md) | A guided tour of every component, with commands and files |
 | [`docs/threat-model.md`](docs/threat-model.md) | The attacker, the assets and the channels |

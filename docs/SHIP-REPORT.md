@@ -22,7 +22,8 @@ produced it.
 | SGLang's deterministic mode *does* eliminate divergence | 1 of 128, cache on and off | **Measured** |
 | `cache_salt` exists upstream and is unenforced | vLLM + llm-d source | **Verified by source read** |
 | SGLang has the same unenforced gap, and `extra_key` is the wrong field | `sgl-project/sglang@30705c0` | **Verified by source read** |
-| The tenant-salt plugin closes the routing-index channel | 22 Go tests against real llm-d | **Compiles and passes; the EPP is now in the request path, but the hardened profile has not been run** |
+| The tenant-salt plugin closes the routing-index channel | 22 Go tests against real llm-d | **Compiles, passes, and now runs in a live cluster — but its *effect* is unmeasured** |
+| The hardened trust boundary works | Run #13: 401 unauthenticated, 404 probes served through a fail-closed plugin | **Measured** |
 | No client-observable routing oracle exists on the simulator | ADR-011, CI run #12, n=402 | **Measured, with a positive control** |
 | A routing-index leak exists to instrument | EPP prefix index: 402 of 404 lookups matched | **Measured** |
 | The attack works against a client | — | **Not established, and ADR-011 says why: it rescopes to FR-B-09 on real vLLM.** |
@@ -85,17 +86,15 @@ a machine with normal egress it is correct as written (ADR-008).
 
 ## 5. What is not done
 
-- **The hardened profile has never been run.** The topology stands up in CI on
-  every push, the EPP is in the request path, and S-02 has a recorded verdict
-  (ADR-011) — but every run so far is the `default` profile. Until a `hardened`
-  run exists, the mitigation is tested code that has never been exercised
-  against the thing it mitigates, and the two-profile diff that is supposed to
-  be the deliverable has never been measured.
-- **The trust boundary is half-wired.** `proxy.stripInboundHeaders` is rendered;
-  `proxy.injectIdentityHeader` and `proxy.stripInboundBodyFields` are declared in
-  `values-hardened.yaml` and read by no template. Until they are, the hardened
-  profile reads a client-supplied identity header and the mitigation is forgeable
-  at the edge — which is half of what ADR-006 says the mitigation *is*.
+- **The mitigation's effect is unmeasured.** Both profiles now run in CI on
+  every push and the hardened trust boundary demonstrably works (run #13), but
+  the S-02 probe schedule buries the single cross-tenant event in 403
+  same-tenant repeats, so the aggregate prefix hit ratio is identical under both
+  — as it should be. **The two-profile diff that this project has promised since
+  its requirements were written still does not exist.**
+  `bench/results/hardened-run13-2026-09-07.md` states what FR-B-03's
+  instrumented demonstration has to do instead, and why the obvious aggregate
+  cannot do it.
 - **No receipt has been signed against a real engine.** The pipeline is
   exercised end to end against the stub (`make attest-demo`, including a
   tamper-detection test); the GPU runs measured divergence and cost but did not

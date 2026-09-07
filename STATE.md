@@ -753,3 +753,45 @@ something.
 2. **FR-B-03 as instrumented demonstration** (ADR-011): show the leak from the
    EPP's own prefix index, and show the hardened profile closing it. That is the
    two-profile diff, and it is the one measurement BARRIER still owes.
+
+---
+
+## Run #13 — the hardened profile runs; its effect does not yet show
+
+`595a84f`, both matrix jobs green. First execution of `values-hardened.yaml`
+against a live cluster. Full writeup:
+`bench/results/hardened-run13-2026-09-07.md`.
+
+**Established.** `gateway answered: 401` on an unauthenticated request; 404
+probes served at ~225 ms median with real keys. Because `tenant-salt` runs
+`failClosed: true`, those 404 successes are a *passing test* of the trust
+boundary: had the `OVERWRITE_IF_EXISTS_OR_ADD` injection not fired, or fired on
+the wrong header, the plugin would have rejected every one. And the hardened
+`rendered.yaml` carries `__KEY_TENANT_A__` placeholders, not credentials.
+
+**Not established, and the numbers say why.**
+
+| profile | run | hit-ratio sum/count | mean | index size |
+|---|---|---|---|---|
+| default | #12 | 400 / 404 | 0.990 | 8 |
+| hardened | #13 | 399.5 / 404 | 0.989 | 9 |
+
+Identical — **and that is the expected result.** The S-02 schedule is tenant A
+repeating its own prefix 200 times; same tenant means same salt, so those hit
+under both profiles and the mitigation is not meant to change them. Exactly one
+probe in the run is a genuine cross-tenant test. An aggregate hit ratio cannot
+measure this mitigation, and quoting 0.990 against 0.989 in either direction
+would be meaningless.
+
+## Next — FR-B-03, and it is the last substantial thing BARRIER owes
+
+An instrumented demonstration that isolates the cross-tenant event the S-02
+schedule buries: tenant B plants a fresh prefix, tenant A submits the same
+prefix once, and the match ratio **attributed to that request** is recorded.
+Repeated over fresh prefixes for an n worth an interval, run identically under
+both profiles.
+
+The pre-registered rule already covers it: the attack succeeds if `default`
+clears the bar, the mitigation succeeds if `hardened` straddles chance. **Both
+halves are required and neither exists.** Everything else in the repository is
+measured or explicitly scoped out.

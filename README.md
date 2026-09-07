@@ -27,7 +27,7 @@
 |---|---|
 | Tests | **272 Python + 20 Go passing** |
 | Gate | `make check` — format, lint, strict types, tests, Go build/vet/test |
-| Measured results | **None yet.** No number is published until it has evidence behind it. |
+| Measured results | **Stage 1: divergence observed** on an A40 (CC 8.6) — `bench/results/stage1-a40-2026-09-07.md`. Everything else still unmeasured. |
 
 Every headline number this README will eventually carry must trace to committed
 raw output plus the exact command and git SHA that produced it. There are no
@@ -66,6 +66,12 @@ two engines rather than one: see below.
 
 SR 11-7 and its international analogues assume a model's output can be reproduced
 and validated. Almost nobody has connected these two facts.
+
+**Measured, 2026-09-07:** on an A40, `Qwen2.5-0.5B-Instruct` at temperature 0
+with a fixed seed produced **two distinct logprob vectors across 32 trials**
+(split 24/8) once batch composition varied. The default posture is not
+reproducible — measured, not cited. It says nothing yet about what invariance
+costs; that is the next run.
 
 **What ATTEST does:** demonstrates the divergence under adversarial batch
 composition, proves bitwise reproducibility once invariance is on, **quantifies

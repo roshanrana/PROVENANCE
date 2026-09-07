@@ -1,7 +1,7 @@
 # Ship report
 
 **Date:** 2026-09-07 · **SHA at writing:** see `git log -1`
-**Verdict: ATTEST ships. BARRIER does not yet, and the reason is stated rather than hidden.**
+**Verdict: both ship. ATTEST's numbers are measured; BARRIER's attack and its mitigation are now measured too, on the same schedule, by a rule fixed before either existed.**
 
 Phase 7 of the lifecycle. Its job is to say what is true, what is claimed, and
 what is not — in a form a reviewer can check without trusting the author.
@@ -22,9 +22,10 @@ produced it.
 | SGLang's deterministic mode *does* eliminate divergence | 1 of 128, cache on and off | **Measured** |
 | `cache_salt` exists upstream and is unenforced | vLLM + llm-d source | **Verified by source read** |
 | SGLang has the same unenforced gap, and `extra_key` is the wrong field | `sgl-project/sglang@30705c0` | **Verified by source read** |
-| The tenant-salt plugin closes the routing-index channel | 22 Go tests against real llm-d | **Compiles, passes, and now runs in a live cluster — but its *effect* is unmeasured** |
+| The routing index leaks across tenants | ADR-012, run #15: AUC 1.0000, p=9.999e-05, n=80 | **Measured** |
+| The tenant-salt plugin closes it | ADR-012, run #15: AUC 0.5000, at chance, same schedule | **Measured** |
 | The proxy refuses unauthenticated callers | Run #13: `gateway answered: 401` | **Measured** |
-| The proxy's injected identity reaches the plugin | — | **Claimed in run #13 and WITHDRAWN. Route-level header mutations are invisible to ext_proc (F-27); the EPP was reading the client's own header.** |
+| The proxy's injected identity reaches the plugin | Run #15: FR-B-03 sends no identity header and is served | **Measured** — claimed wrongly in run #13, withdrawn, then established (F-27) |
 | No client-observable routing oracle exists on the simulator | ADR-011, CI run #12, n=402 | **Measured, with a positive control** |
 | A routing-index leak exists to instrument | EPP prefix index: 402 of 404 lookups matched | **Measured** |
 | The attack works against a client | — | **Not established, and ADR-011 says why: it rescopes to FR-B-09 on real vLLM.** |
@@ -91,15 +92,16 @@ a machine with normal egress it is correct as written (ADR-008).
 
 ## 5. What is not done
 
-- **The mitigation's effect is unmeasured.** Both profiles now run in CI on
-  every push and the hardened trust boundary demonstrably works (run #13), but
-  the S-02 probe schedule buries the single cross-tenant event in 403
-  same-tenant repeats, so the aggregate prefix hit ratio is identical under both
-  — as it should be. **The two-profile diff that this project has promised since
-  its requirements were written still does not exist.**
-  `bench/results/hardened-run13-2026-09-07.md` states what FR-B-03's
-  instrumented demonstration has to do instead, and why the obvious aggregate
-  cannot do it.
+- **The measured attack is a confirmation oracle, not an extraction one.** The
+  probe sends the victim's text verbatim, so AUC 1.0 is by construction. It
+  shows that an attacker who can *guess* a prefix gets it confirmed; it shows
+  nothing about recovering unknown content, and ADR-012 says so.
+- **One workload.** Identical-versus-disjoint prompts separate perfectly. A
+  partially-shared prefix would put the ratio somewhere in between and make it a
+  continuous quantity worth an interval that is not degenerate. Not run.
+- **The client-observable oracle remains open** and is FR-B-09's, on real vLLM
+  where TTFT varies with cache state. ADR-011 established the simulator cannot
+  answer it.
 - **No receipt has been signed against a real engine.** The pipeline is
   exercised end to end against the stub (`make attest-demo`, including a
   tamper-detection test); the GPU runs measured divergence and cost but did not

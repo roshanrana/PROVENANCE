@@ -330,3 +330,44 @@ it. Running further would be optional stopping.
   simulator cannot answer the question, which is what D-01 predicted.
 - Oracle code may now be written. It could not be before this line existed.
 - The result is publishable as it stands and NFR-17 anticipated it.
+
+---
+
+## ADR-012 — FR-B-03 measured: the routing-index leak exists and the tenant salt closes it
+
+**Date:** 2026-09-07 · **Phase:** 5 · **Status:** accepted
+**Evidence:** BARRIER CI run #15, SHA `a357e08`,
+`bench/results/frb03-run15-2026-09-07.md`
+
+**Context.** BARRIER has claimed since its requirements that llm-d's prefix-cache
+routing shares a namespace across tenants, and that a salt derived from
+authenticated identity closes it. Neither half had ever been measured.
+
+**Decision.** Both are now measured, on the same schedule, by the rule fixed in
+advance (NFR-05):
+
+| profile | probe | control | AUC | 95% CI | p | verdict |
+|---|---|---|---|---|---|---|
+| default | 1.0000 | 0.0000 | 1.0000 | [1.0000, 1.0000] | 9.999e-05 | `attack_succeeds` |
+| hardened | 0.0000 | 0.0000 | 0.5000 | [0.5000, 0.5000] | 1 | `at_chance` |
+
+**Rationale for believing the hardened zero.** The same job's ground-truth step
+shows the index matching 401 of 404 lookups on that cluster. The index works
+under `hardened`; what goes to zero is specifically one tenant reaching
+another's entry.
+
+**Scope, stated so it cannot be quoted past.** This is a **confirmation** oracle,
+not an extraction one: the probe sends the victim's text verbatim, so a match of
+1.0 is by construction. It establishes that an attacker who can *guess* a prefix
+gets it confirmed by the routing layer — which matters where prompts are
+predictable — and establishes nothing about recovering unknown content. The
+degenerate intervals reflect zero variance in the observations, and `p` sits at
+the permutation floor.
+
+**Consequences.**
+- FR-B-03 is satisfied in the form ADR-011 rescoped it to: operator-instrumented,
+  read from the router's own index.
+- The two-profile diff (`values-default.yaml` against `values-hardened.yaml`) is
+  now backed by a measurement rather than by an argument.
+- The partially-shared-prefix workload, where the ratio becomes continuous rather
+  than binary, is the obvious follow-up and is not done.

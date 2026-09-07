@@ -878,3 +878,49 @@ because it always supplied the header itself.
 **Run #14 also validated the FR-B-03 guards.** The measurement refused to run
 rather than recording a broken cluster as a mitigation — which is exactly the
 behaviour `test_a_non_200_from_the_gateway_is_not_silently_measured` asserts.
+
+---
+
+## ADR-012 — FR-B-03 MEASURED. Both halves.
+
+Run #15 (`a357e08`), 40 trials per profile, n=80 per verdict.
+
+| profile | probe | control | AUC | 95% CI | p | verdict |
+|---|---|---|---|---|---|---|
+| default | 1.0000 | 0.0000 | 1.0000 | [1.0000, 1.0000] | 9.999e-05 | `attack_succeeds` |
+| hardened | 0.0000 | 0.0000 | 0.5000 | [0.5000, 0.5000] | 1 | `at_chance` |
+
+**The attack works and the tenant salt closes it**, on the identical schedule,
+by the NFR-05 rule fixed before any attack code existed.
+
+The hardened zero is not a broken cluster: the same job's ground truth shows the
+index matching 401 of 404 lookups. What goes to zero is specifically one tenant
+reaching another's entry.
+
+**Stated so it cannot be quoted past:** this is a *confirmation* oracle. The
+probe sends the victim's text verbatim, so 1.0 is by construction. It shows an
+attacker who can guess a prefix gets it confirmed; it shows nothing about
+recovering unknown content. The degenerate intervals are zero variance, not
+precision, and `p` sits at the permutation floor.
+
+`bench/results/frb03-run15-2026-09-07.md` · `docs/design/decisions.md` ADR-012
+
+## Where the project stands
+
+Every claim in the ship report now traces to a measurement or is explicitly
+marked as not established. Both workstreams have their headline result:
+
+- **ATTEST** — divergence, vLLM invariance and its cost, the SGLang 2×2
+  decomposition. Measured on rented H100/A40 for about $2.00.
+- **BARRIER** — the routing-index leak and its mitigation, measured in public CI
+  on every push, both profiles, £0.
+
+## Next, none of it load-bearing
+
+1. **Partially-shared prefixes.** The measured separation is binary because the
+   prompts are identical or disjoint. A shared system prompt with differing
+   tails would make the match ratio continuous and the interval non-degenerate.
+2. **FR-B-09** — the client-observable oracle on real vLLM, where TTFT varies
+   with cache state. ADR-011 established the simulator cannot answer it.
+3. Confidence intervals on the SGLang 2×2; SGLang's Triton backend; why vLLM's
+   batch-invariant mode leaves 5 residual vectors of 128.

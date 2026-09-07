@@ -284,3 +284,62 @@ number that made no sense — a 32-trial cell finishing in zero seconds, twice.
 2. **A-05** — two-engine llm-d topology in the kind chart. Backlog, needs (1).
 3. Confidence intervals on the A-03 2×2; SGLang's Triton backend; dependence on
    model size and batch shape; why vLLM's 5 residual vectors remain.
+
+---
+
+## Finding F-18 — the topology never puts the EPP in the request path
+
+Found 2026-09-07 by reading the deploy path against what it would actually do,
+while waiting on the first CI run of `barrier.yml`. **Not yet fixed.**
+
+`barrier/deploy/chart/templates/gateway.yaml` renders an Envoy config whose only
+HTTP filter is `envoy.filters.http.router`, routing `/` straight to the `sim`
+cluster. There is **no `ext_proc` filter anywhere in the chart** — the string
+does not appear in `barrier/deploy/` at all. The EPP is deployed, exposes 9002,
+has a Service, and is never called.
+
+Three consequences, in descending order of seriousness:
+
+1. **The `tenant-salt` plugin cannot run.** It is a `RequestHeaderProcessor` in
+   an ext_proc server that nothing sends requests to. Every test it passes is a
+   unit test.
+2. **The default-vs-hardened diff would produce identical behaviour**, because
+   the only rendered difference is a header-strip on a path where no component
+   reads that header. `make barrier-diff` would show a real diff in YAML and no
+   difference in what runs — the worst possible outcome for a deliverable whose
+   whole argument is "a real gap closes with one plugin and one proxy rule".
+3. **S-02 would probe a bare Envoy → simulator path**, not an llm-d routing
+   layer. A `NO CLIENT-OBSERVABLE SIGNAL` verdict from that topology would be
+   correct about the thing measured and meaningless about the thing claimed —
+   and it is the verdict this topology is most likely to produce.
+
+Two smaller gaps in the same file, from the same cause:
+
+- `proxy.injectIdentityHeader: x-llmd-tenant` is declared in
+  `values-hardened.yaml` and **read by no template**. The proxy strips the
+  client's header and then vouches for nothing, so even with ext_proc wired the
+  plugin would fail closed on every request (which is at least the safe
+  direction).
+- `proxy.stripInboundBodyFields: [cache_salt]` is likewise declared and
+  unimplemented. Envoy cannot strip a JSON body field with the filters
+  configured here; it needs a Lua filter or equivalent.
+
+**Why this was not caught sooner.** The chart has never been applied. Every
+component was reviewed in isolation and each is individually correct; the seam
+between Envoy and the EPP is the one thing a unit test cannot reach. This is the
+same class as the `ko` image reference (T-032) and the stub-only readback
+endpoint (F-14) — a joint between two pieces, invisible until something runs.
+
+**What it means for the claims.** Nothing published changes: no BARRIER result
+has ever been asserted, and `docs/SHIP-REPORT.md` already records the attack as
+*not established*. But the gap is larger than "not yet run" implied — the
+topology as committed could not have demonstrated the effect even if it had been
+stood up, and the ship report should say so.
+
+**Not blind-fixed.** Wiring ext_proc correctly means an `http_filters` entry
+with a gRPC service pointing at `provenance-epp:9002`, matching `processing_mode`
+for request headers *and* body (the plugin rewrites `cache_salt`), plus a way to
+inject a vouched identity. That is real Envoy configuration, and writing it
+untested — into the one component whose failure mode is *looking like it works* —
+is how F-14 happened. `barrier.yml` now gives a ten-minute loop to build it
+against; the next session should use it.

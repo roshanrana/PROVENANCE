@@ -22,7 +22,7 @@ produced it.
 | SGLang's deterministic mode *does* eliminate divergence | 1 of 128, cache on and off | **Measured** |
 | `cache_salt` exists upstream and is unenforced | vLLM + llm-d source | **Verified by source read** |
 | SGLang has the same unenforced gap, and `extra_key` is the wrong field | `sgl-project/sglang@30705c0` | **Verified by source read** |
-| The tenant-salt plugin closes the routing-index channel | 22 Go tests against real llm-d | **Compiles and passes; never deployed** |
+| The tenant-salt plugin closes the routing-index channel | 22 Go tests against real llm-d | **Compiles and passes; never deployed — and see F-18, the chart never puts it in the request path** |
 | The attack works | — | **Not established. No cluster has been stood up.** |
 
 The last row is the honest state of BARRIER and is why this report does not say
@@ -42,8 +42,10 @@ to publish only its successes.
 | 5 | Stage 2 would have run both arms against one engine | Wiring the job, before the meter started |
 | 6 | **The guard against #5 had the bug it was written to prevent** — it read a stub-only endpoint, failed open, and produced an H100 result that was the opposite of the truth | A 32-trial cell finishing in **zero seconds** |
 | 7 | The first "invariance fixes it" result was underpowered at 32 trials | Re-running at 128 |
+| 8 | `up.sh` discarded the image reference `ko` produced, so the EPP deploy referenced an image nobody built | Reading the deploy path before the first CI run |
+| 9 | **The chart never wires Envoy to the EPP** — no `ext_proc` filter exists, so the plugin cannot run and the two profiles would behave identically | Same. Recorded as F-18, not yet fixed |
 
-**Six of the seven were caught before or by a number that made no sense.** The
+**Eight of the nine were caught before or by a number that made no sense.** The
 one that reached a published claim (#6/#7) was amended in place, with the wrong
 run left in `bench/results/` and explained.
 

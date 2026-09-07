@@ -13,7 +13,7 @@ EPP_DIR := barrier/epp
 
 .PHONY: help bootstrap check check-full check-ship fmt lint typecheck test \
         go-check attest-demo attest-stage1 attest-stage2 \
-        barrier-up barrier-spike barrier-diff barrier-down headline clean
+        barrier-up barrier-spike barrier-diff barrier-down headline card card-check clean
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -78,6 +78,12 @@ attest-stage2: ## Stage 2 measured matrix. Needs ENGINE_URL, MODEL, MAX_TOKENS.
 
 headline: ## Write metrics/headline.json: observed numbers only; offline, seeded, no GPU
 	$(UV) run python -m metrics.headline
+
+card: headline ## Render docs/assets/metrics.svg and the README results block from headline.json
+	$(UV) run python metrics/render.py
+
+card-check: ## Fail if the README card is stale relative to metrics/headline.json
+	$(UV) run python metrics/render.py --check
 
 # --------------------------------------------------------------------------- barrier
 

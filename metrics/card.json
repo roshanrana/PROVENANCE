@@ -1,0 +1,9 @@
+{
+  "title": "PROVENANCE results",
+  "subtitle": "Bootstrap calibration and the demonstrated-versus-pending ledger, observed offline; the GPU figures are recorded in docs/RESULTS.md and listed here as pending.",
+  "make_target": "make headline",
+  "kpi_order": [
+    "bootstrap_coverage",
+    "components"
+  ]
+}

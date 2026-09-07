@@ -45,6 +45,44 @@ layer, which matters where prompts are predictable. It does not show that unknow
 content can be recovered, and ADR-012 says so at the point of the claim rather
 than in a footnote.
 
+<!-- metrics:start -->
+
+## Results
+
+<img src="docs/assets/metrics.svg" alt="Results card" width="920">
+
+Every figure below was observed by `make headline`, which runs offline with a fixed seed and no API key, and writes `metrics/headline.json`. Bootstrap calibration and the demonstrated-versus-pending ledger, observed offline; the GPU figures are recorded in docs/RESULTS.md and listed here as pending. Rows marked *pending* need hardware, data or a service the offline harness does not have; nothing here is estimated.
+
+| Metric | Value | How it was measured |
+|---|---|---|
+| Bootstrap CI coverage | **91.0%** | 200 null datasets, nominal 95%; n=100, 200 resamples, seeds 1000+ |
+| Components | **8** | declared in docs/design/02-hld.md §4; every path present on the tree |
+
+**Observed offline**
+
+| | | |
+|---|---|---|
+| Null datasets whose 95% CI contained 0.5 | `██████████████████░░` | 182/200 |
+| Claims verifiable with no GPU | `███████░░░░░░░░░░░░░` | 4/11 |
+
+**What has been demonstrated, and what has not**
+
+| | Status | Evidence |
+|---|---|---|
+| Receipt pipeline, end to end, including tamper detection | observed | `make attest-demo` runs matrix → ledger → engine → raw JSONL → canonical receipt → signature → verification → manifest, then tampers with the receipt and requires exit code 3 |
+| Statistical decision rules and their calibration | observed | `common/stats/` tests, including the 200-dataset bootstrap calibration |
+| Tenant-salt derivation and plugin registration | observed | Go tests in `barrier/epp/` |
+| Default-vs-hardened deployment diff | observed | `make barrier-diff` |
+| Batch-composition divergence | pending | 34 of 128 distinct logprob vectors at temperature 0; 5 of 128 remain under vLLM's batch-invariant mode, 1 of 128 under SGLang's deterministic mode [pending: needs a GPU or the CI kind cluster; recorded in bench/results, not re-observed by this offline harness] |
+| Cost of determinism | pending | 18.0% of throughput on SGLang, isolated from prefix caching (D/B ratio 0.820); 22.7% on vLLM, confounded with cache loss, 95% CI [0.741, 0.808] [pending: needs a GPU or the CI kind cluster; recorded in bench/results, not re-observed by this offline harness] |
+| Two-tenant cluster topology, both profiles | pending | GitHub Actions CI brings up the simulator-backed llm-d deployment in `default` and `hardened` and runs S-02 and FR-B-03 against it, for £0 [pending: needs Docker + kind; runs in the BARRIER CI workflow] |
+| The routing index leaks across tenants, and the tenant salt closes it | pending | ADR-012, CI run #15, 40 trials per profile, n=80 per verdict: `default` probe match ratio 1.0000 vs control 0.0000, AUC 1.0000 [1.0000, 1.0000], p=9.999e-05; `hardened` probe 0.0000, AUC 0.5000, at chance [pending: needs a GPU or the CI kind cluster; recorded in bench/results, not re-observed by this offline harness] |
+| A client-observable routing oracle on the simulator | pending | ADR-011, CI run #12, n=402: latency AUC 0.5581 [0.5026, 0.6138], p=0.0425, clearing no pre-registered threshold [pending: needs a GPU or the CI kind cluster; recorded in bench/results, not re-observed by this offline harness] |
+| A client-observable timing oracle on real vLLM | pending | FR-B-09. The simulator does not vary time-to-first-token on cache hits, so it cannot answer the question [pending: FR-B-09 is open: needs real vLLM on a GPU] |
+| Recovery of unknown victim content | not claimed | The measured attack is a confirmation oracle: the probe sends the victim's prompt verbatim, so the perfect match is by construction. It shows a guessed prefix being confirmed, nothing more [blocked: not claimed by design] |
+
+<!-- metrics:end -->
+
 ---
 
 ## At a glance

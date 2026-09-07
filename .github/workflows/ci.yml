@@ -52,6 +52,9 @@ jobs:
       - name: make check
         run: make check
 
+      - name: README results card is current
+        run: make card-check
+
   demo:
     name: M0 walking skeleton
     runs-on: ubuntu-latest

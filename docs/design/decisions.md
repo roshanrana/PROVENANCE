@@ -175,3 +175,105 @@ weaker half of the mitigation presented as the whole.
 residual shrinks from "a second open channel" to "whatever survives partitioning both."
 The plugin must be able to mutate the outbound request body, which constrains where in the
 request lifecycle it hooks — to be confirmed against the runner API during implementation.
+
+---
+
+## ADR-008 — The Go toolchain block is retired, not designed around
+
+**Date:** 2026-09-07 · **Phase:** 5 · **Status:** accepted · **Supersedes:** the BLOCKED note in `docs/tasks/T-003-go-scaffold.md`
+
+**Context.** `llm-d-router@v0.10.0` declares `go 1.26.6`. The build container shipped
+1.24.7, and T-003 was marked blocked under the two-strike rule, with an earlier amendment
+to HLD §7.1 accepting that BARRIER's Go would not compile in an agent-reachable
+environment.
+
+**Options.** (a) Keep the block and defer every Go compile to the user's machine.
+(b) Build Go 1.26.6 from source in the container. (c) Downgrade the router dependency.
+
+**Decision.** (b), plus a scratch-only `replace` overlay for module resolution.
+
+**Rationale.** The block was asserted rather than tested. Re-testing found
+`github.com/golang/go` reachable over git, and `GOTOOLCHAIN=local
+GOROOT_BOOTSTRAP=$(go env GOROOT) ./make.bash` produced a working 1.26.6. Module
+resolution then failed separately, because egress blocks `proxy.golang.org` and every
+vanity host; mapping each vanity path to its GitHub repository in a **scratch copy** of
+the module resolves the graph. (c) was never viable — the frozen contracts are written
+against v0.10.0's interfaces.
+
+**Consequences.** BARRIER's Go now builds, vets and tests in the container, which is how
+the two defects in ADR-010 were found. The `replace` overlay is never committed: it is a
+container workaround, and a reader who cloned it would inherit an unbuildable module. On
+a machine with normal egress, plain `go mod tidy` is correct and no overlay is needed.
+The general lesson is recorded because it cost real time: **a limit that has not been
+re-tested is a guess.**
+
+---
+
+## ADR-009 — SGLang as ATTEST's control arm for the cost-of-determinism decomposition
+
+**Date:** 2026-09-07 · **Phase:** 5 (plan amendment A-01) · **Status:** accepted
+
+**Context.** ATTEST's headline deliverable is the cost of determinism. vLLM's
+batch-invariant kernels are not integrated with prefix caching upstream, so D-06 pins APC
+off for the primary claim. Every cost number ATTEST can produce on vLLM alone therefore
+measures *determinism plus the loss of the prefix cache*, with no way to separate the two.
+
+**Options.** (a) Publish the vLLM number with a stated caveat. (b) Add SGLang as a second
+engine and decompose. (c) Drop the cost claim.
+
+**Decision.** (b), narrowly: harness and spike now, measurement held behind T-028's
+existing human decision point.
+
+**Rationale.** SGLang runs deterministically **with** the radix cache on
+(`--enable-deterministic-inference` on the FA3 or Triton attention backend; FlashInfer
+cannot). That supplies the missing cell of the caching × determinism 2×2: `C − D` isolates
+what the cache is worth under determinism, `D − B` isolates determinism's own cost. On
+vLLM alone only the sum is observable, and it would be published under the wrong name.
+(a) leaves the obvious reviewer question — *isn't this really the prefix-cache loss?* —
+with no answer. (c) discards the project's most distinctive result.
+
+The second engine is admitted as **methodology, not coverage**, and the write-up must
+lead with the decomposition. "Also supports SGLang" is a weaker line than one deep result,
+and framing it that way would make the amendment a net loss.
+
+**Consequences.** D-06 is amended: prefix caching is pinned off *for vLLM*, and the reason
+is an upstream integration gap rather than a property of determinism. `EngineState` gains
+an engine discriminator while the receipt schema stays versioned and stable. No GPU minute
+is committed by this ADR. The negative-result rule applies unchanged: if SGLang's
+deterministic mode shows no measurable advantage, that is the published result. Any
+measurement must pin the SGLang version and endpoint, because
+`sgl-project/sglang#15481` reports seeded determinism misbehaving on `/v1/completions`.
+
+---
+
+## ADR-010 — BARRIER's mitigation is engine-portable, and the portability is asserted by test
+
+**Date:** 2026-09-07 · **Phase:** 5 · **Status:** accepted · **Resolves:** S-03
+
+**Context.** A-01 raised the possibility that obligation 3 (partition the engine's own KV
+cache) could not be met on SGLang, which would have made the mitigation engine-scoped and
+forced a published limitation.
+
+**Options.** (a) Publish the mitigation as vLLM-only. (b) Extend it to whatever field
+SGLang uses. (c) Establish that no change is needed.
+
+**Decision.** (c), on the evidence in `docs/design/spikes/S-03-sglang-cache-salt.md`.
+
+**Rationale.** SGLang accepts `cache_salt` — llm-d's own field name — on `/generate`,
+`/v1/completions`, `/v1/chat/completions` and responses, and it namespaces both the
+in-process radix tree and the KV-event hashes SGLang publishes, seeded with an explicit
+`sglang-cache-salt-v1\0` domain separator. The salt reaches an SGLang engine by exactly the
+path it reaches a vLLM one.
+
+Two findings from the spike change what the project says rather than what it builds.
+**`extra_key` is the wrong field**: it namespaces the in-process tree but is not folded
+into the published event hash, so a mitigation built on it would close the engine cache
+and leave the routing-derived index shared — and `extra_key` is the field SGLang's own
+prefix-caching documentation shows for multi-tenancy. And **the unsalted path is the
+shared namespace on SGLang too**, which makes BARRIER's unenforced-control thesis a
+cross-engine pattern rather than a single-implementation quirk.
+
+**Consequences.** A-04 shrinks from "extend the mitigation" to a test plus a threat-model
+paragraph. The claim must be stated as *verified by source read at commit `30705c0`*, not
+as measured, until A-03 runs against a live engine — and it must pin a version, since
+llm-d's SGLang manifest targets `lmsysorg/sglang:v0.5.12`, which this spike did not check.

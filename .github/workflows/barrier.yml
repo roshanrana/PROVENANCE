@@ -118,6 +118,39 @@ jobs:
       - name: Run the S-02 spike
         run: uv run python -m barrier.attack.spike_s02 --gateway http://localhost:8080 --repeats 30
 
+      # The spike says so itself, in every run: "a spike that only looked
+      # client-side cannot tell 'no signal' from 'we did not look'." A verdict of
+      # NO CLIENT-OBSERVABLE SIGNAL is only worth anything if the router actually
+      # had something to signal — if the prefix index never recorded a match,
+      # then the run measured a broken configuration and called it a security
+      # property. So the EPP's own view is captured, and the job FAILS if it
+      # cannot be captured, rather than letting the verdict stand unbacked.
+      - name: Capture the EPP's ground truth
+        run: |
+          set -euo pipefail
+          mkdir -p bench/results/epp-ground-truth
+          kubectl -n provenance port-forward svc/provenance-epp 9090:9090 &
+          for _ in $(seq 1 30); do
+            curl -sf -o /dev/null http://localhost:9090/metrics && break
+            sleep 1
+          done
+          curl -sf http://localhost:9090/metrics > bench/results/epp-ground-truth/metrics.txt
+          kubectl -n provenance logs -l app=provenance-epp --tail=3000 \
+            > bench/results/epp-ground-truth/epp.log
+
+          echo "--- prefix-cache metrics the EPP reports ---"
+          grep -iE 'prefix' bench/results/epp-ground-truth/metrics.txt | grep -v '^#' | head -40 || true
+          echo "--- scheduling decisions in the EPP log ---"
+          grep -icE 'prefix|scored|picked|endpoint' bench/results/epp-ground-truth/epp.log || true
+
+          if ! grep -qiE 'prefix' bench/results/epp-ground-truth/metrics.txt; then
+            echo "GROUND TRUTH MISSING: the EPP reports no prefix-cache metric at all." >&2
+            echo "  'no client-observable signal' and 'the router never indexed a prefix'" >&2
+            echo "  are different findings, and this run cannot tell them apart. The" >&2
+            echo "  spike's verdict must NOT be recorded from this run." >&2
+            exit 5
+          fi
+
       - name: Collect cluster state on failure
         if: failure()
         run: |

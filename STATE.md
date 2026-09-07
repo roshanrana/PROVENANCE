@@ -462,3 +462,50 @@ is the same class of defect as F-18.
 F-20 and F-21 are all in the deploy path, all invisible to `make check`, and
 three of the four were found by reading or running the thing rather than by any
 test this repository owns. That is the honest summary of BARRIER's maturity.
+
+---
+
+## Finding F-22 — the simulator's latency flags are Go durations, not integers
+
+Found 2026-09-07 from BARRIER CI run #5 (`8d66105`), which is the first run that
+got the topology *up*:
+
+```
+provenance-epp-…       1/1  Running
+provenance-gateway-…   1/1  Running
+provenance-sim-…       0/1  CrashLoopBackOff  (×2)
+
+failed to read configuration err="invalid argument \"200\" for
+  \"--time-to-first-token\" flag: time: missing unit in duration \"200\""
+```
+
+`llm-d-inference-sim` documents it plainly — *"All latency-related parameters are
+defined in duration format, e.g. 100ms. Integer format is deprecated."* — and
+`:latest` has since removed the integer form outright. `200ms` / `10ms`.
+
+**The image is now pinned to `v0.11.2`.** `:latest` is how this arrived: the
+values file was written against a simulator that accepted integers and silently
+stopped being that simulator. A topology whose output is evidence cannot depend
+on an image that changes underneath it, and this repository's whole subject is
+claims a reader can re-derive.
+
+### What run #5 confirmed, which matters more than what it broke
+
+F-18, F-20 and F-21 are **fixed, by evidence rather than by argument**:
+
+- `ko build` → `kind load docker-image` distributed the image to all three
+  nodes. F-20 closed.
+- The EPP parsed its config and reached Ready: `gRPC server listening name=ext-proc
+  port=9002`, `name=health port=9003`, pod controller started, caches populated.
+  That is the `apiVersion`/`kind` envelope, the declared plugins and the
+  standalone `--endpoint-selector` discovery all working. F-21 closed.
+- Envoy accepted the `ext_proc` filter and the `ORIGINAL_DST` cluster —
+  `cm init: all clusters initialized`, `starting main dispatch loop`, gateway
+  1/1 Running. The EPP is in the request path for the first time. F-18 closed
+  as far as the *wiring* goes.
+
+**Still open from F-18:** `proxy.injectIdentityHeader` and
+`proxy.stripInboundBodyFields` are declared in `values-hardened.yaml` and read by
+no template. Until they are, the hardened profile reads a client-controlled
+identity header, and the mitigation is forgeable at the edge. `stripInboundHeaders`
+is wired; the injection half is not.

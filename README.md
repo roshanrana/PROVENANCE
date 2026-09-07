@@ -36,6 +36,17 @@ undermine the one thing the project is actually claiming.
 
 ---
 
+## At a glance
+
+| | |
+|---|---|
+| **The problem** | A regulated institution's shared LLM inference platform cannot reproduce its own outputs for a model validator, and its cache-aware router leaks which prefixes other tenants have used across an information barrier. |
+| **What it does** | ATTEST signed inference receipts, model identity binding to Hugging Face commits and weight digests, resumable measurement harness, pre-registered statistical decision rules, BARRIER tenant-salt threat model, llm-d EPP plugin, default-vs-hardened deployment diff. |
+| **Stack** | Python 3.12, uv, pytest, ruff, mypy, NumPy/SciPy, cryptography/ed25519, Go 1.26, vLLM, **SGLang**, llm-d, Kubernetes/kind, Helm-style manifests. |
+| **Validation** | `make check`, 272 Python + 20 Go tests, coverage gates, `make attest-demo`, receipt tamper tests, bootstrap/permutation/AUC tests, Go salt-derivation and salt-coverage tests compiled against real llm-d, CI mirror of local gates. Hardware-dependent vLLM measurements and kind cluster verification are documented as explicit next gates. |
+
+---
+
 ## The two workstreams
 
 ### ATTEST — reproducibility as a model-risk control
@@ -237,10 +248,18 @@ zero-day in llm-d:** the framing is a configuration and threat-model gap in the
 default deployment posture, demonstrated against our own cluster. No third-party
 SaaS in the reproduction path.
 
-Threat model: `docs/threat-model.md`. Design documents: `docs/design/`.
+| | |
+|---|---|
+| [`docs/OVERVIEW.md`](docs/OVERVIEW.md) | The setting, the two workstreams, what is demonstrated and what needs hardware |
+| [`docs/SHOWCASE.md`](docs/SHOWCASE.md) | A guided tour of every component, with commands and files |
+| [`docs/threat-model.md`](docs/threat-model.md) | The attacker, the assets and the channels |
+| [`docs/design/`](docs/design/) | Upstream findings, requirements, HLD, LLD, execution plan, decisions |
+| [`docs/design/07-amendment-sglang.md`](docs/design/07-amendment-sglang.md) | Why SGLang is here, what it costs, and what it does not buy |
+| [`docs/design/spikes/`](docs/design/spikes/) | Spike records — decision rule fixed before the evidence was read |
+
 
 ---
 
 ## License
 
-TBD before the repository goes public.
+MIT. See `LICENSE`.

@@ -1,0 +1,19 @@
+{
+  "model": "opus",
+  "effortLevel": "high",
+  "autoCompactWindow": "500k",
+  "fallbackModel": ["sonnet"],
+  "permissions": {
+    "allow": [
+      "Bash(uv:*)",
+      "Bash(go:*)",
+      "Bash(gofmt:*)",
+      "Bash(golangci-lint:*)",
+      "Bash(make:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(pytest:*)"
+    ]
+  }
+}

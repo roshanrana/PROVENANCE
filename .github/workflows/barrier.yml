@@ -80,8 +80,14 @@ jobs:
       - name: Sync dependencies
         run: uv sync --frozen
 
+      # Invoked as `bash up.sh`, not `./up.sh`. The exec bit was missing from the
+      # committed file and the first CI run died with exit 126 — "found, not
+      # executable" — after 1m21s, before touching Docker. The mode is fixed in
+      # the same commit, but a repo that is edited on Windows will lose it again,
+      # and a workflow that cannot survive that is a workflow that fails for a
+      # reason unrelated to the thing it tests.
       - name: Bring up the topology
-        run: ./up.sh "${{ inputs.profile || 'default' }}"
+        run: bash up.sh "${{ inputs.profile || 'default' }}"
         working-directory: barrier/deploy/kind
 
       - name: Port-forward the gateway

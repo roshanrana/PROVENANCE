@@ -1,10 +1,13 @@
 package plugin
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
+	fwkplugin "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/plugin"
 	fwkrh "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/requesthandling"
+	fwksched "github.com/llm-d/llm-d-router/pkg/epp/framework/interface/scheduling"
 	"github.com/llm-d/llm-d-router/pkg/epp/framework/plugins/requestcontrol/dataproducer/tokenizer"
 )
 
@@ -112,5 +115,74 @@ func TestApplySaltIsANoOpWithoutASalt(t *testing.T) {
 	}
 	if ApplySalt(nil, testSalt) != 0 {
 		t.Fatal("nil body should be a no-op, not a panic")
+	}
+}
+
+// TestRequestHeaderSaltsTheTokenizedPath is the end-to-end assertion S-03 asked
+// for: not that ApplySalt can set a field, but that a request arriving with a
+// tenant header comes out the other side with a derived salt on the
+// pre-tokenized body.
+//
+// That path is the one an SGLang-backed pool is driven through, and it is the
+// one that was silently unsalted until ec00137. Testing ApplySalt alone would
+// not have caught that, because ApplySalt was never reached for it.
+func TestRequestHeaderSaltsTheTokenizedPath(t *testing.T) {
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	p := &TenantSalt{
+		typedName: fwkplugin.TypedName{Type: PluginType, Name: "t"},
+		cfg:       Config{IdentityHeader: DefaultIdentityHeader},
+		secret:    secret,
+	}
+
+	body := &fwkrh.InferenceRequestBody{Generate: &fwkrh.GenerateRequest{}}
+	request := &fwksched.InferenceRequest{
+		Headers: map[string]string{DefaultIdentityHeader: "equity-research"},
+		Body:    body,
+	}
+
+	if err := p.RequestHeader(context.Background(), request); err != nil {
+		t.Fatalf("RequestHeader: %v", err)
+	}
+
+	want, err := DeriveSalt(secret, "equity-research")
+	if err != nil {
+		t.Fatalf("DeriveSalt: %v", err)
+	}
+	if body.Generate.CacheSalt != want {
+		t.Fatalf("Generate.CacheSalt = %q, want the derived salt %q", body.Generate.CacheSalt, want)
+	}
+	// And the hasher must agree, since it is what actually seeds the chain.
+	if got := tokenizer.CacheSaltFromBody(body); got != want {
+		t.Fatalf("hasher would read %q, want %q", got, want)
+	}
+}
+
+// TestTwoTenantsDoNotShareANamespaceOnTheTokenizedPath states the property the
+// mitigation exists for, on the surface that was leaking.
+func TestTwoTenantsDoNotShareANamespaceOnTheTokenizedPath(t *testing.T) {
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	p := &TenantSalt{
+		typedName: fwkplugin.TypedName{Type: PluginType, Name: "t"},
+		cfg:       Config{IdentityHeader: DefaultIdentityHeader},
+		secret:    secret,
+	}
+
+	salts := make([]string, 0, 2)
+	for _, tenant := range []string{"equity-research", "m-and-a"} {
+		body := &fwkrh.InferenceRequestBody{Generate: &fwkrh.GenerateRequest{}}
+		req := &fwksched.InferenceRequest{
+			Headers: map[string]string{DefaultIdentityHeader: tenant},
+			Body:    body,
+		}
+		if err := p.RequestHeader(context.Background(), req); err != nil {
+			t.Fatalf("RequestHeader(%s): %v", tenant, err)
+		}
+		salts = append(salts, body.Generate.CacheSalt)
+	}
+	if salts[0] == salts[1] {
+		t.Fatal("two tenants received the same salt: the namespaces are not disjoint")
+	}
+	if salts[0] == "" || salts[1] == "" {
+		t.Fatal("an empty salt is the shared default namespace, not isolation")
 	}
 }

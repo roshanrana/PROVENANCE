@@ -217,7 +217,7 @@ Every item runs in the environment that is otherwise idle waiting on hardware.
 | A-01 | `attest/harness/sglang.py` — lifecycle, readback, refusals | container | M | **DONE** |
 | A-02 | Generalise `EngineState` over an engine discriminator; predicate v0.2 | container | S | **DONE** |
 | A-03 | The caching × determinism 2×2, both engines, one model | **GPU** | L | **Held** — stage-2 option under T-028's existing decision point |
-| A-04 | Test that the derived salt reaches the engine as `cache_salt` on the pre-tokenized path; threat-model paragraph on the `extra_key` trap | container | S | Backlog |
+| A-04 | Test that the derived salt reaches the engine as `cache_salt` on the pre-tokenized path; threat-model paragraph on the `extra_key` trap | container | S | **DONE** |
 | A-05 | Two-engine llm-d topology in the kind chart | cluster | M | Backlog |
 
 **A-04 shrank because S-03 came back affirmative.** It was scoped as "extend the mitigation

@@ -55,6 +55,43 @@ environments. **BARRIER does not invent salting, and must never claim to.**
 The gap is that it is **unenforced**: optional, client-supplied, and bound to
 nothing.
 
+### The same gap exists in a second, independent engine
+
+Read from `sgl-project/sglang` at commit `30705c0` (spike S-03, ADR-010).
+
+SGLang — a first-class engine in llm-d, with its own KV-events adapter,
+disaggregation connector and deployment manifests — accepts **`cache_salt`**
+under llm-d's own field name on `/generate`, `/v1/completions`,
+`/v1/chat/completions` and responses. It reaches `RadixKey.cache_salt`, which
+namespaces both the in-process radix tree and the KV-event hashes SGLang
+publishes, seeded with an explicit `sglang-cache-salt-v1\0` domain separator.
+
+Two consequences for this threat model.
+
+**The unsalted path is the shared namespace there too.** When `cache_salt` is
+absent, `compute_node_event_hash_values` falls through to the unsalted hash. So
+the omission, forgery and negligence failure modes of §5 are not an artefact of
+one implementation — they are the same unenforced-control pattern in two
+independently written engines. That is a stronger claim than the original brief
+made, and it is the reason this section exists.
+
+**`extra_key` is the wrong field, and it is the one the documentation shows.**
+SGLang's own prefix-caching documentation presents `extra_key` for multi-tenant
+isolation. It namespaces the engine's in-process tree — but it is **not** folded
+into the published event hash, because `get_hash_str` receives only the key's
+tokens and the parent digest. A mitigation built on `extra_key` would therefore
+close the engine's own cache while leaving llm-d's routing-derived index shared:
+the weaker half presented as the whole, which is precisely the partial fix §7
+warns against. `cache_salt` is the field that closes both.
+
+This is a documentation gap, not a defect, and must be reported as one.
+
+**Verified by source read, not by measurement.** No SGLang engine has been run,
+no request sent, no cache hit observed. The chain is unambiguous in source at
+that commit, but llm-d's own manifest pins `lmsysorg/sglang:v0.5.12`, which this
+spike did not check. Any deployment claim must pin a version it was checked
+against.
+
 ---
 
 ## 3. Actors and trust boundaries

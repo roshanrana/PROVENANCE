@@ -125,25 +125,39 @@ RUN_RC="${PIPESTATUS[0]}"
 set -e
 say "run driver exited $RUN_RC"
 
-# ---------------------------------------------------------------- the payload
+# ---------------------------------------------------------------- delivery
 #
-# The pod's stdout is the delivery mechanism — there is no shared filesystem
-# between the pod and whoever launched it. Results are gzipped and base64'd
-# between markers so that engine chatter interleaved into the same stream
-# cannot corrupt them.
+# Two tiers, learned the hard way. The first run emitted the whole results tree
+# as gzipped base64 — ~180 log lines — and the only channel out of a pod is its
+# log stream, read back a bounded page at a time. Reassembling it cost more than
+# the run. So the summary is always printed and the payload is opt-in.
 
 emit_and_exit() {
   local rc="${1:-0}"
-  say "--- payload ---"
-  local bundle="/tmp/stage1-payload.tgz"
-  tar czf "$bundle" -C "$(dirname "$RESULTS_ROOT")" "$(basename "$RESULTS_ROOT")" 2>/dev/null \
-    || tar czf "$bundle" --files-from /dev/null
-  {
+
+  say "--- summary ---"
+  # The newest run directory: the driver names them with a sortable run-id.
+  RUN_DIR="$(ls -1dt "$RESULTS_ROOT"/*/ 2>/dev/null | head -1)"
+  if [ -n "${RUN_DIR:-}" ]; then
+    uv run python gpu/summarise_stage1.py --run-dir "${RUN_DIR%/}" 2>&1 || \
+      say "WARNING: summariser failed; the raw JSONL is still on the pod"
+  else
+    say "WARNING: no run directory under $RESULTS_ROOT — nothing to summarise"
+  fi
+
+  if [ "${EMIT_PAYLOAD:-0}" = "1" ]; then
+    say "--- payload (EMIT_PAYLOAD=1) ---"
+    local bundle="/tmp/stage1-payload.tgz"
+    tar czf "$bundle" -C "$(dirname "$RESULTS_ROOT")" "$(basename "$RESULTS_ROOT")" 2>/dev/null \
+      || tar czf "$bundle" --files-from /dev/null
     echo "-----BEGIN PROVENANCE STAGE1 PAYLOAD-----"
     base64 -w 120 "$bundle"
     echo "-----END PROVENANCE STAGE1 PAYLOAD-----"
-  }
-  say "payload bytes: $(wc -c < "$bundle")"
+    say "payload bytes: $(wc -c < "$bundle")"
+  else
+    say "payload suppressed (set EMIT_PAYLOAD=1 to dump the full results tree)"
+  fi
+
   say "exit rc=$rc"
   say "=== ATTEST stage 1 complete ==="
   exit "$rc"

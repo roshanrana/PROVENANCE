@@ -1,0 +1,129 @@
+name: BARRIER cluster
+
+# The S-02 spike, run in public.
+#
+# BARRIER's entire attack rests on a premise nobody has tested: can an ordinary
+# API caller observe anything that distinguishes a cache hit from a miss? Until
+# this workflow existed, answering it meant an evening on someone's laptop with
+# Docker Desktop, and the answer would have been a paragraph in a README that a
+# reviewer had to take on trust.
+#
+# Everything the topology needs — Docker, kind, kubectl, helm, ko, Go — is
+# available on a stock ubuntu-latest runner, and `up.sh` was already written for
+# an operator who is not watching: it fails loudly and writes its own transcript.
+# So the spike runs here, on every push, and the log is the evidence.
+#
+# It is deliberately NOT part of `make check`. CI's check job is a mirror of the
+# local gate (see ci.yml) and adding a ten-minute cluster build to it would make
+# the fast feedback loop slow enough that people stop running it.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "barrier/**"
+      - ".github/workflows/barrier.yml"
+  pull_request:
+    paths:
+      - "barrier/**"
+      - ".github/workflows/barrier.yml"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "default (the leaking config) or hardened (the mitigation)"
+        required: false
+        default: "default"
+        type: choice
+        options: [default, hardened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  spike:
+    name: "S-02 spike (${{ inputs.profile || 'default' }})"
+    runs-on: ubuntu-latest
+    # Generous, because a first run pulls the simulator image and builds the EPP
+    # from source. A timeout that trips on a cold cache reads as a broken spike.
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # llm-d-router v0.10.0 declares `go 1.26.6` and the EPP image is built from
+      # source every time — a stale image is exactly the thing that makes a
+      # hardened run silently behave like a default one (ADR-008).
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.6"
+          cache-dependency-path: barrier/epp/go.sum
+
+      - name: Install kind, ko and helm
+        run: |
+          set -euo pipefail
+          go install sigs.k8s.io/kind@latest
+          go install github.com/google/ko@latest
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Bring up the topology
+        run: ./up.sh "${{ inputs.profile || 'default' }}"
+        working-directory: barrier/deploy/kind
+
+      - name: Port-forward the gateway
+        run: |
+          set -euo pipefail
+          kubectl -n provenance port-forward svc/provenance-gateway 8080:80 &
+          # Wait for the forward rather than sleeping a fixed amount: a fixed
+          # sleep either wastes runner minutes or races a slow rollout.
+          for _ in $(seq 1 60); do
+            curl -sf -o /dev/null http://localhost:8080/ && break
+            sleep 2
+          done
+          curl -sf -o /dev/null http://localhost:8080/ \
+            || echo "gateway did not answer; the spike will record that as its result"
+
+      # The spike's decision rule was fixed in advance (LLD §7) and travels
+      # inside its own evidence file, so a result cannot be rationalised after
+      # the fact. Both outcomes are publishable: no client-observable signal
+      # rescopes FR-B-03 to an instrumented demonstration, which the
+      # requirements were written to survive (NFR-17).
+      - name: Run the S-02 spike
+        run: uv run python -m barrier.attack.spike_s02 --gateway http://localhost:8080
+
+      - name: Collect cluster state on failure
+        if: failure()
+        run: |
+          kubectl -n provenance get pods -o wide || true
+          kubectl -n provenance describe pods || true
+          kubectl -n provenance logs -l app=provenance-epp --tail=200 || true
+          kubectl -n provenance logs -l app=provenance-sim --tail=100 || true
+
+      # The transcript IS the deliverable. up.sh writes rendered manifests and a
+      # manifest.json carrying the values hash, so a reader can see exactly what
+      # ran rather than re-deriving it from a chart version (ADR-004).
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: barrier-evidence-${{ inputs.profile || 'default' }}
+          path: bench/results/
+          if-no-files-found: warn
+
+      - name: Tear down
+        if: always()
+        run: kind delete cluster --name provenance || true

@@ -73,9 +73,12 @@ a machine with normal egress it is correct as written (ADR-008).
 ## 5. What is not done
 
 - **BARRIER has never run.** No cluster, no S-02 verdict, no attack, no
-  statistics. `NEXT-STEPS.md` §1 is the path, it costs nothing, and until it
-  happens BARRIER is a well-tested mitigation for a leak this project has not
-  itself demonstrated.
+  statistics. Until it does, BARRIER is a well-tested mitigation for a leak this
+  project has not itself demonstrated, and this report says so rather than
+  implying otherwise.
+  **`.github/workflows/barrier.yml` now runs the spike on any push touching
+  `barrier/**`**, so the verdict arrives as a public CI log rather than a claim —
+  but at the time of writing it has not yet fired.
 - **No receipt has been signed against a real engine.** The pipeline is
   exercised end to end against the stub (`make attest-demo`, including a
   tamper-detection test); the GPU runs measured divergence and cost but did not

@@ -10,8 +10,21 @@ runs on your own machine, for nothing.
 
 ## 1. The one substantial claim still unmeasured — S-02
 
-**Time:** an evening. **Cost:** £0. **Needs:** Docker Desktop with the WSL2
-backend, which you already have.
+**It now runs itself.** `.github/workflows/barrier.yml` stands up the kind
+topology on a GitHub Actions runner, port-forwards the gateway, runs the spike
+and uploads `bench/results/` as an artifact. It fires on any push touching
+`barrier/**`, or on demand from the Actions tab — where you can also pick the
+`hardened` profile instead of `default`.
+
+So the fastest path is: **push, then read the run.** Running it locally is now
+optional, and worth doing only if you want to iterate on the spike itself
+rather than just get its verdict.
+
+Local instructions kept below, because a reviewer cloning the repo should be
+able to reproduce it without a GitHub account.
+
+**Time:** an evening, if you do it by hand. **Cost:** £0. **Needs:** Docker
+Desktop with the WSL2 backend, which you already have.
 
 BARRIER's whole attack rests on a premise nobody has tested: **can an ordinary
 API caller observe anything that distinguishes a cache hit from a miss?** If the

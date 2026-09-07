@@ -60,13 +60,23 @@ proxy:
   # reading an attacker-controlled header and the whole mitigation is forgeable
   # at the edge — so this is not hardening around the fix, it is half of it.
   #
-  # cache_salt is stripped from the request body for the same reason: a client
-  # that could set it directly could still choose its own namespace.
+  # Realised as an Envoy OVERWRITE_IF_EXISTS_OR_ADD on the authenticated route
+  # rather than a remove-then-add: Envoy applies request_headers_to_remove AFTER
+  # request_headers_to_add, so a strip rule on the injected header would delete
+  # the proxy's own vouching. Any OTHER header listed here is still removed.
   stripInboundHeaders:
     - x-llmd-tenant
-  stripInboundBodyFields:
-    - cache_salt
   injectIdentityHeader: x-llmd-tenant
+
+  # There is deliberately no `stripInboundBodyFields: [cache_salt]` here.
+  #
+  # It was declared for two releases and read by no template, which is the F-18
+  # defect in miniature. Writing it now would be worse: `ApplySalt` already
+  # OVERRIDES cache_salt on every body variant the prefix hasher reads, so a
+  # client-supplied value is replaced rather than merely dropped. That is
+  # strictly stronger than stripping, it is tested (plugin_test.go), and adding
+  # a second mechanism in the proxy would mean two things could disagree about
+  # which namespace a request belongs to.
 
 tenants:
   - name: tenant-a

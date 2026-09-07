@@ -125,15 +125,29 @@ kind load docker-image "$EPP_IMAGE" --name "$CLUSTER"
 # attack the plugin exists to close.
 echo
 echo "--> generating tenant credentials and the salt secret"
+# Written to disk as well as to the cluster, because the attack client has to
+# authenticate as a tenant and nothing else can tell it the key.
+#
+# NOT under bench/results/: that directory is uploaded wholesale as a CI
+# artifact, and .gitignore keeps a file out of git, not out of an artifact. A
+# tenant key published beside the evidence would make every isolation claim in
+# this repository void.
+KEY_DIR="${KEY_DIR:-$REPO_ROOT/.secrets/tenant-keys}"
+mkdir -p "$KEY_DIR"
+chmod 700 "$KEY_DIR"
 for tenant in tenant-a tenant-b; do
+  key="$(openssl rand -hex 16)"
   kubectl -n "$NAMESPACE" create secret generic "${tenant}-key" \
-    --from-literal=key="$(openssl rand -hex 16)" \
+    --from-literal=key="$key" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  printf '%s' "$key" > "$KEY_DIR/$tenant"
+  chmod 600 "$KEY_DIR/$tenant"
+  unset key
 done
 kubectl -n "$NAMESPACE" create secret generic provenance-salt \
   --from-literal=secret="$(openssl rand -hex 32)" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-echo "    secrets applied (values not logged)"
+echo "    secrets applied (values not logged); keys for the client in $KEY_DIR"
 
 # --- deploy ------------------------------------------------------------------
 VALUES="$REPO_ROOT/barrier/deploy/values-$PROFILE.yaml"

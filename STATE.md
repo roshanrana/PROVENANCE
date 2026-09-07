@@ -704,3 +704,52 @@ not a cache signal — D-01 says TTFT does not vary with cache state at all.
    two-profile diff is the deliverable and has never been measured.
 3. **FR-B-03 as instrumented demonstration** — the leak is shown from the EPP's
    own prefix index, which is the channel the mitigation actually closes.
+
+---
+
+## F-18 closed — the trust boundary is wired, and the hardened profile now runs
+
+The two values keys that were declared and read by no template are read now.
+
+**`injectIdentityHeader`.** One Envoy route per tenant, matched on the API key
+the proxy issued, injecting the identity with
+`append_action: OVERWRITE_IF_EXISTS_OR_ADD`. Overwrite rather than
+remove-then-add because **Envoy applies `request_headers_to_remove` after
+`request_headers_to_add`** — a strip rule on the injected header would have
+deleted the proxy's own vouching. Anything else in `stripInboundHeaders` is
+still removed; the injected header is excluded from that list at render time.
+Unauthenticated requests get a 401 from the proxy rather than reaching the EPP
+with no identity, which would be salted with the empty string — the shared
+default namespace, arrived at by a path that looks like success.
+
+**`stripInboundBodyFields` is deliberately gone.** `ApplySalt` already OVERRIDES
+`cache_salt` on every body variant the prefix hasher reads, which is stronger
+than stripping and is tested. Building a second mechanism in the proxy would
+mean two things could disagree about which namespace a request belongs to.
+
+**Keys never enter the rendered manifest.** The ConfigMap holds
+`envoy.yaml.tmpl` with `__KEY_TENANT_A__` placeholders; a busybox init container
+substitutes them from the tenant Secrets into an emptyDir before Envoy starts.
+`helm --set` would have put live credentials into `rendered.yaml`, which up.sh
+commits as evidence — unacceptable in a repository about tenant isolation, and
+forbidden by CLAUDE.md. The init container never `cat`s the result.
+
+**Keys are written to `.secrets/tenant-keys/`, not `bench/results/`.** That
+directory is uploaded wholesale as a CI artifact, and `.gitignore` keeps a file
+out of git, not out of an artifact.
+
+**CI now runs both profiles on every push** (matrix, `fail-fast: false`). For
+eleven runs only `default` had ever executed, so the mitigation was tested code
+that had never met the thing it mitigates — and a workflow that runs only the
+unmitigated half cannot notice that the hardened half does not start.
+
+**Unverified locally.** No helm in this container, so neither profile has been
+rendered here; the first hardened bring-up is the check. Expect it to find
+something.
+
+## Next
+
+1. Read run #13 — specifically whether `hardened` starts at all.
+2. **FR-B-03 as instrumented demonstration** (ADR-011): show the leak from the
+   EPP's own prefix index, and show the hardened profile closing it. That is the
+   two-profile diff, and it is the one measurement BARRIER still owes.

@@ -42,8 +42,17 @@ concurrency:
 
 jobs:
   spike:
-    name: "S-02 spike (${{ inputs.profile || 'default' }})"
+    name: "S-02 spike (${{ matrix.profile }})"
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # Both profiles, every push. The diff between them IS the deliverable
+      # (values-default.yaml vs values-hardened.yaml), and for eleven runs only
+      # `default` had ever been executed — so the mitigation was tested code
+      # that had never met the thing it mitigates. A workflow that runs only the
+      # unmitigated half cannot notice that the hardened half does not start.
+      matrix:
+        profile: ${{ inputs.profile && fromJSON(format('["{0}"]', inputs.profile)) || fromJSON('["default","hardened"]') }}
     # Generous, because a first run pulls the simulator image and builds the EPP
     # from source. A timeout that trips on a cold cache reads as a broken spike.
     timeout-minutes: 45
@@ -87,7 +96,7 @@ jobs:
       # and a workflow that cannot survive that is a workflow that fails for a
       # reason unrelated to the thing it tests.
       - name: Bring up the topology
-        run: bash up.sh "${{ inputs.profile || 'default' }}"
+        run: bash up.sh "${{ matrix.profile }}"
         working-directory: barrier/deploy/kind
 
       - name: Port-forward the gateway
@@ -125,7 +134,15 @@ jobs:
       # chance. n=402 is chosen once, and the verdict it returns is the verdict
       # recorded, whichever way it goes.
       - name: Run the S-02 spike
-        run: uv run python -m barrier.attack.spike_s02 --gateway http://localhost:8080 --repeats 200
+        run: |
+          set -euo pipefail
+          # The hardened gateway authenticates, so the client needs the keys the
+          # proxy issued. up.sh writes them under .secrets/ — deliberately NOT
+          # under bench/results/, which is uploaded wholesale as an artifact.
+          uv run python -m barrier.attack.spike_s02 \
+            --gateway http://localhost:8080 --repeats 200 \
+            --key-a "$(cat .secrets/tenant-keys/tenant-a)" \
+            --key-b "$(cat .secrets/tenant-keys/tenant-b)"
 
       # The spike says so itself, in every run: "a spike that only looked
       # client-side cannot tell 'no signal' from 'we did not look'." A verdict of
@@ -180,6 +197,7 @@ jobs:
           # — Envoy refuses to start on an unknown field, and without this the
           # symptom is a silent CrashLoopBackOff (F-18).
           kubectl -n provenance logs -l app=provenance-gateway --tail=200 || true
+          kubectl -n provenance logs -l app=provenance-gateway -c render-config --tail=20 || true
           kubectl -n provenance get events --sort-by=.lastTimestamp | tail -40 || true
 
       # The transcript IS the deliverable. up.sh writes rendered manifests and a
@@ -189,7 +207,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: barrier-evidence-${{ inputs.profile || 'default' }}
+          name: barrier-evidence-${{ matrix.profile }}
           path: bench/results/
           if-no-files-found: warn
 

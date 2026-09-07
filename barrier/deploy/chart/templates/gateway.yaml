@@ -27,7 +27,16 @@ kind: ConfigMap
 metadata:
   name: provenance-gateway-config
 data:
-  envoy.yaml: |
+  # A TEMPLATE, not the config. `__KEY_TENANT_A__` and friends are substituted
+  # at pod start by an init container reading the tenant Secrets.
+  #
+  # The alternative — passing the keys to `helm --set` — would put live tenant
+  # credentials into `rendered.yaml`, which up.sh commits as evidence (ADR-004).
+  # A repository whose subject is tenant isolation cannot publish the tenant
+  # keys next to the results, and CLAUDE.md forbids it outright. So the
+  # committed artefact shows the placeholders and the substitution is visible in
+  # the pod spec below, which is strictly more auditable than a literal.
+  envoy.yaml.tmpl: |
     admin:
       address:
         socket_address: { address: 127.0.0.1, port_value: 19000 }
@@ -47,11 +56,68 @@ data:
                         - name: all
                           domains: ["*"]
                           routes:
+                            {{- if .Values.proxy.injectIdentityHeader }}
+                            {{/*
+                              ADR-006, and the half of the mitigation that was
+                              declared in values-hardened.yaml and read by no
+                              template until now. One route per tenant, matched
+                              on the API key the proxy issued. The identity
+                              header is OVERWRITTEN rather than removed-then-
+                              added: Envoy applies request_headers_to_remove
+                              after request_headers_to_add, so a strip rule here
+                              would delete the proxy's own injection. Overwrite
+                              is one operation with no ordering to get wrong.
+
+                              Without this the EPP reads x-llmd-tenant straight
+                              from the client, and the mitigation is forgeable by
+                              anyone who can set a header.
+                            */}}
+                            {{- $strip := without .Values.proxy.stripInboundHeaders .Values.proxy.injectIdentityHeader }}
+                            {{- range .Values.tenants }}
+                            - match:
+                                prefix: "/"
+                                headers:
+                                  - name: authorization
+                                    string_match:
+                                      exact: "Bearer __KEY_{{ .name | upper | replace "-" "_" }}__"
+                              {{- with $strip }}
+                              # Every other header the profile distrusts. The
+                              # injected identity is excluded from this list
+                              # because Envoy removes after it adds, so leaving
+                              # it here would strip the proxy's own vouching.
+                              request_headers_to_remove:
+                              {{- range . }}
+                                - {{ . }}
+                              {{- end }}
+                              {{- end }}
+                              request_headers_to_add:
+                                - header:
+                                    key: {{ $.Values.proxy.injectIdentityHeader }}
+                                    value: {{ .name }}
+                                  append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                              route:
+                                cluster: original_destination_cluster
+                                timeout: 300s
+                                idle_timeout: 300s
+                            {{- end }}
+                            # Anything that did not authenticate. Refused here
+                            # rather than routed with no identity: an
+                            # unauthenticated request reaching the EPP would be
+                            # salted with the empty string, which is the shared
+                            # default namespace — the exposure being closed,
+                            # arrived at by a path that looks like success.
+                            - match: { prefix: "/" }
+                              direct_response:
+                                status: 401
+                                body:
+                                  inline_string: "unauthenticated: no tenant credential\n"
+                            {{- else }}
+                            # DEFAULT profile: one route, no authentication, and
+                            # x-llmd-tenant is whatever the client said it was.
+                            # Not a strawman — it is what the upstream quickstart
+                            # gives you, and NFR-18 depends on that being true.
                             - match: { prefix: "/" }
                               {{- with .Values.proxy.stripInboundHeaders }}
-                              # On the Route, not the RouteAction. Removed before
-                              # ext_proc sees the request, so the EPP reads only
-                              # what the proxy vouches for (ADR-006).
                               request_headers_to_remove:
                               {{- range . }}
                                 - {{ . }}
@@ -64,6 +130,7 @@ data:
                                 cluster: original_destination_cluster
                                 timeout: 300s
                                 idle_timeout: 300s
+                            {{- end }}
                     http_filters:
                       - name: envoy.filters.http.ext_proc
                         typed_config:
@@ -135,6 +202,38 @@ spec:
       annotations:
         provenance/proxy-sha: {{ toYaml .Values.proxy | sha256sum }}
     spec:
+      # Substitutes the tenant keys into the config template. A separate
+      # container because the Envoy image is distroless — no shell, nothing to
+      # run a substitution with — and because keeping it separate means the
+      # proxy process never has the keys in its environment.
+      initContainers:
+        - name: render-config
+          image: busybox:1.37
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              cp /etc/envoy-template/envoy.yaml.tmpl /etc/envoy/envoy.yaml
+              {{- range .Values.tenants }}
+              sed -i "s|__KEY_{{ .name | upper | replace "-" "_" }}__|${KEY_{{ .name | upper | replace "-" "_" }}}|g" /etc/envoy/envoy.yaml
+              {{- end }}
+              # Never `cat` the result. A rendered config in a pod log is every
+              # tenant credential in a pod log.
+              echo "config rendered ($(wc -l < /etc/envoy/envoy.yaml) lines)"
+          env:
+            {{- range .Values.tenants }}
+            - name: KEY_{{ .name | upper | replace "-" "_" }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .apiKeySecret }}
+                  key: key
+            {{- end }}
+          volumeMounts:
+            - name: config-template
+              mountPath: /etc/envoy-template
+            - name: config
+              mountPath: /etc/envoy
       containers:
         - name: envoy
           # Pinned, and pinned to >= 1.33: FULL_DUPLEX_STREAMED does not exist
@@ -147,8 +246,10 @@ spec:
             - name: config
               mountPath: /etc/envoy
       volumes:
-        - name: config
+        - name: config-template
           configMap: { name: provenance-gateway-config }
+        - name: config
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

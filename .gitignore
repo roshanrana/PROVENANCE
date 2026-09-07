@@ -11,6 +11,10 @@ htmlcov/
 *.ed25519
 !tests/fixtures/testkey.ed25519
 .env
+.secrets/
+# Kept as well: the original home for generated tenant keys. They now live in
+# .secrets/ instead, because bench/results/ is uploaded WHOLESALE as a CI
+# artifact and .gitignore keeps a file out of git, not out of an artifact.
 bench/results/**/tenant-keys/
 
 # Transfer artefacts from the Cowork session — never part of the repo.

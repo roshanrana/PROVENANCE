@@ -84,6 +84,9 @@ modelServers:
     - --inter-token-latency=10
 
 epp:
+  # Overridden by up.sh with the reference ko actually produced — see the same
+  # note in values-default.yaml. The two profiles must run the SAME binary, or
+  # the diff between them stops being the mitigation and starts being the build.
   image: provenance-epp:dev
   # tenant-salt registers as Alpha (it has not been through upstream review), so
   # the runner needs this to load it. Stating that plainly is more honest than

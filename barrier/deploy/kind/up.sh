@@ -80,7 +80,17 @@ echo "--> building the custom EPP image (ADR-002: our plugin + upstream runner)"
 pushd "$REPO_ROOT/barrier/epp" >/dev/null
 export KO_DOCKER_REPO="kind.local"
 export KIND_CLUSTER_NAME="$CLUSTER"
-ko build ./cmd/epp --bare --tags dev
+# ko prints the image reference it produced on stdout, and that reference is the
+# ONLY thing that names the image it side-loaded into the cluster. Discarding it
+# and letting the chart's default (`provenance-epp:dev`) stand meant deploying an
+# image nobody had built — ImagePullBackOff, then a rollout that times out after
+# five minutes with no obvious cause. Captured and passed to helm below.
+EPP_IMAGE="$(ko build ./cmd/epp --bare --tags dev | tail -1)"
+if [ -z "$EPP_IMAGE" ]; then
+  echo "MISSING: ko produced no image reference." >&2
+  exit 4
+fi
+echo "    built: $EPP_IMAGE"
 popd >/dev/null
 
 # --- secrets -----------------------------------------------------------------
@@ -107,9 +117,12 @@ echo "--> deploying with $(basename "$VALUES")"
 # The rendered manifests are committed alongside results. Helm templating is
 # opaque when debugging, and a reader should be able to see exactly what ran
 # rather than re-deriving it from values plus a chart version (ADR-004).
+# --set overrides the chart default with what ko actually built. The rendered
+# manifests are committed, so the image a reader sees is the image that ran.
 helm template provenance "$HERE/../chart" \
   --namespace "$NAMESPACE" \
-  --values "$VALUES" > "$LOG_DIR/rendered.yaml"
+  --values "$VALUES" \
+  --set epp.image="$EPP_IMAGE" > "$LOG_DIR/rendered.yaml"
 echo "    rendered manifests: $LOG_DIR/rendered.yaml"
 
 kubectl apply -n "$NAMESPACE" -f "$LOG_DIR/rendered.yaml"

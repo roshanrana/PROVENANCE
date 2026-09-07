@@ -34,6 +34,12 @@ spec:
       containers:
         - name: epp
           image: {{ .Values.epp.image }}
+          # ko side-loads the image directly into the kind node, so there is no
+          # registry to pull it from. Always would fail; IfNotPresent uses what
+          # was loaded. up.sh rebuilds and reloads on every run, so this cannot
+          # go stale — and a stale EPP is exactly what makes a hardened profile
+          # behave like a default one.
+          imagePullPolicy: IfNotPresent
           args:
             - --config-file=/etc/epp/config.yaml
             - --v={{ if eq .Values.epp.logLevel "debug" }}4{{ else }}2{{ end }}

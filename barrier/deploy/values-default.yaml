@@ -65,6 +65,9 @@ modelServers:
     - --inter-token-latency=10
 
 epp:
+  # Overridden by up.sh with the reference ko actually produced. Left here so
+  # `helm template` alone still renders, but a run that uses this literal value
+  # is a run whose EPP image was never built.
   image: provenance-epp:dev
   extraArgs: []
   logLevel: info

@@ -8,21 +8,37 @@ crawl or `git log` archaeology — this file exists so that is never necessary.
 
 ## Now
 
-- **Phase:** 4 — Guardrails · **design phases 0–3 complete and approved**
-- **Status:** Execution plan **approved 2026-08-29**. Build handed off to **OpenAI Codex** —
-  see `docs/design/06-codex-runbook.md`. `AGENTS.md`, `START-HERE.md`, `codex/` in place.
-  No application code written yet.
-- **Blocked on:** nothing. Ready for Wave 1.
-- **Next:** re-verify `00-upstream-findings.md` (NFR-19), then **T-001 inline**, then Wave 2
+- **Phase:** 7 — shipped. Both workstreams have their headline result measured.
+- **Gate:** `make check` green — 308 Python, 22 Go. CI stands up the two-tenant
+  kind topology in **both profiles on every push** and runs S-02 and FR-B-03 with it.
+- **Blocked on:** nothing.
 
-## Next
+| | result | evidence |
+|---|---|---|
+| ATTEST | determinism costs **18.0%** on SGLang (isolated), 22.7% on vLLM (confounded); 34/128 distinct vectors at temperature 0, 5 under vLLM invariance, 1 under SGLang's | `bench/results/`, ADR-009 |
+| BARRIER | the routing-index leak is real (**AUC 1.0000**, p=9.999e-05, n=80) and the tenant salt closes it (**AUC 0.5000**, at chance), same schedule | ADR-012, run #15 |
+| S-02 | **no client-observable oracle** on the simulator; FR-B-03 rescoped to an operator-instrumented demonstration | ADR-011, run #12 |
 
-1. Phase 4 — Wave 1 is **T-001 alone** (scaffold), then wave 2: T-002, T-003, T-006,
-   T-008, T-009. Re-verify `00-upstream-findings.md` first (NFR-19). Run via
-   `codex --profile orchestrator`; see `docs/design/06-codex-runbook.md`.
-2. **T-035 runs the S-02 spike** (wave 8, Roshan's machine). Its verdict must be in
-   `decisions.md` before any oracle code exists — T-043's pack cannot be completed until then.
-3. M0 gate at wave 5: `make check` **and** `make attest-demo` green in CI.
+**Read the findings below before changing anything.** Fourteen defects are
+recorded, four of them guards that contained the defect they were written to
+catch, and one a claim this project made and later withdrew (F-27). They are the
+most useful part of this ledger.
+
+## Next — follow-ups, none load-bearing
+
+1. **Partially-shared prefixes.** FR-B-03's separation is binary because the
+   prompts are identical or disjoint. A shared system prompt with differing tails
+   would make the match ratio continuous and the interval non-degenerate.
+2. **FR-B-09** — the client-observable timing oracle on real vLLM, where TTFT
+   varies with cache state. ADR-011 established the simulator cannot answer it.
+3. Confidence intervals on the SGLang 2×2; SGLang's Triton backend; why vLLM's
+   batch-invariant mode leaves 5 residual vectors of 128.
+
+> The Phase 0–4 planning record that used to sit here — waves, task packs, the
+> Codex handoff — is in `docs/design/04-execution-plan.md` and
+> `docs/design/06-codex-runbook.md`. It was describing a project that had not
+> been built yet, and leaving it at the top of the file a reader is told to trust
+> first was itself the F-18 defect in documentation form.
 
 ---
 

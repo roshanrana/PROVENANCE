@@ -1,104 +1,87 @@
 # What to do next
 
-**Written:** 2026-09-07, replacing the 2026-08-30 version.
-**State:** ATTEST measured and published. BARRIER built, compiling, not yet deployed.
+**Written:** 2026-09-07, replacing the version written earlier the same day —
+which opened with "the one substantial claim still unmeasured" and named S-02.
+That claim, and the two behind it, have since been measured.
 
-Everything that needed rented hardware is done, for about $2.00. What remains
-runs on your own machine, for nothing.
-
----
-
-## 1. The one substantial claim still unmeasured — S-02
-
-**It now runs itself.** `.github/workflows/barrier.yml` stands up the kind
-topology on a GitHub Actions runner, port-forwards the gateway, runs the spike
-and uploads `bench/results/` as an artifact. It fires on any push touching
-`barrier/**`, or on demand from the Actions tab — where you can also pick the
-`hardened` profile instead of `default`.
-
-So the fastest path is: **push, then read the run.** Running it locally is now
-optional, and worth doing only if you want to iterate on the spike itself
-rather than just get its verdict.
-
-Local instructions kept below, because a reviewer cloning the repo should be
-able to reproduce it without a GitHub account.
-
-**Time:** an evening, if you do it by hand. **Cost:** £0. **Needs:** Docker
-Desktop with the WSL2 backend, which you already have.
-
-BARRIER's whole attack rests on a premise nobody has tested: **can an ordinary
-API caller observe anything that distinguishes a cache hit from a miss?** If the
-answer is no on the simulator, FR-B-03 rescopes to an instrumented
-demonstration — a finding, not a failure, and one the requirements were written
-to survive.
-
-The decision rule was fixed in advance (LLD §7) and travels inside the evidence
-file, so the result cannot be rationalised after the fact.
-
-```bash
-# prerequisites, once — see docs/RUNBOOK-local.md for the full list
-go install sigs.k8s.io/kind@latest github.com/google/ko@latest
-
-cd barrier/deploy/kind
-./up.sh default
-uv run python -m barrier.attack.spike_s02 --base-url http://localhost:8080
-```
-
-**What success looks like:** a verdict in `bench/results/`, either
-`ORACLE VIABLE` naming the discriminating signal, or `NO CLIENT-OBSERVABLE
-SIGNAL` and a rescope. Either way, **it must reach `docs/design/decisions.md`
-before any oracle code is written** — the same discipline as S-03 and the
-pre-registered statistics.
-
-Paste the output back and I will take it from there.
+**State: both workstreams have their headline result. Nothing is blocked.**
 
 ---
 
-## 2. The dress rehearsal you never ran
+## Nothing here is required
 
-**Time:** 20 minutes, mostly downloads. **Cost:** £0.
+The previous three versions of this file each had a step 1 that had to happen
+before the project could claim anything. This one does not. Every claim in the
+README and the ship report traces to committed raw output, or is marked as not
+established.
 
-```bash
-./scripts/rehearse-cpu.sh
-```
+| | result | where |
+|---|---|---|
+| ATTEST | determinism costs **18.0%** on SGLang, isolated from prefix caching; 22.7% on vLLM, confounded with it | `bench/results/sglang-2x2-h100-2026-09-07.md` |
+| BARRIER attack | routing index leaks across tenants — **AUC 1.0000**, p=9.999e-05, n=80 | ADR-012, `bench/results/frb03-run15-2026-09-07.md` |
+| BARRIER mitigation | tenant salt closes it — **AUC 0.5000**, at chance, same schedule | same |
+| S-02 | no client-observable oracle on the simulator | ADR-011 |
 
-This became less urgent once the real GPU runs succeeded, but it is still the
-only thing that exercises the harness against a real vLLM on hardware you own.
-It found three bugs before it had even been executed, by making me read vLLM's
-source rather than trust our own stub.
-
----
-
-## 3. Housekeeping that will bite eventually
-
-**Move the repo off OneDrive.** `C:\Users\rosha\Code\PROVENANCE` or similar.
-OneDrive holds file handles inside `.git/objects/`, which is why every push
-prompted about failed deletions. `gc.auto 0` suppressed the symptom. The
-underlying risk — OneDrive syncing a git object mid-write — is worth removing
-from a repository this now has real results in.
+BARRIER's numbers regenerate on every push, both profiles, on GitHub-hosted
+runners. There is nothing to run locally to reproduce them — read the CI log.
 
 ---
 
-## What is deliberately *not* on this list
+## The three follow-ups, in the order I would do them
 
-- **More GPU work.** The remaining ATTEST questions — confidence intervals on
-  the 2×2, SGLang's Triton backend, dependence on model size and batch shape,
-  why vLLM leaves 5 residual vectors — are all real, and none of them changes
-  what the project claims. They are follow-ups, not gaps.
+### 1. Partially-shared prefixes — the experiment that makes the result subtle
+
+**Time:** an hour of code, minutes of CI. **Cost:** £0.
+
+FR-B-03 measures identical-versus-disjoint prompts, so the match ratio is 1.0 or
+0.0 and the AUC is 1.0000 with a degenerate interval. That is a clean result and
+a slightly artificial one.
+
+The realistic case is a **shared system prompt with differing tails** — which is
+what actually happens in a bank, and what prefix caching exists to exploit. The
+match ratio becomes continuous, the interval stops being degenerate, and the
+interesting question becomes *how much* shared prefix an attacker needs before
+the oracle is reliable.
+
+Extend `barrier/attack/demo_frb03.py` with a shared-prefix fraction parameter and
+sweep it. The instrument and the decision rule already work.
+
+### 2. FR-B-09 — the client-observable oracle, on real vLLM
+
+**Time:** an evening. **Cost:** a few dollars of rented GPU.
+
+ADR-011 established that the *simulator* offers a client nothing, and said so as
+a property of the simulator (D-01: it does not vary TTFT on cache hit versus
+miss) rather than of llm-d. Real vLLM does vary. Whether that difference is large
+enough to clear the pre-registered bar from outside the cluster is the open
+question, and it is the one that would turn BARRIER from an operator-visible
+finding into an attacker-visible one.
+
+The GPU harness, the statistics and the decision rule all exist. What is missing
+is a vLLM-backed pool in the kind topology instead of the simulator.
+
+### 3. The ATTEST loose ends
+
+None of these change what the project claims:
+
+- Confidence intervals on the SGLang 2×2. The vLLM cost figure has a bootstrap
+  interval; the 2×2 ratios are point estimates over 128 trials per cell.
+- SGLang's Triton backend. FA3 was used throughout; the compatibility matrix says
+  Triton also supports determinism with the radix cache, and whether the cost
+  differs is unmeasured.
+- **Why vLLM's batch-invariant mode leaves 5 of 128** while SGLang's leaves 1.
+  This is the most interesting unanswered question in the repository.
+
+---
+
+## What is deliberately not on this list
+
 - **Polish.** The README carries the numbers, `bench/results/` carries the
   evidence including the runs that were wrong, and the design record is
-  committed. Rewriting prose is not what this needs next.
-
----
-
-## Where things stand
-
-| | |
-|---|---|
-| Tests | 287 Python, 22 Go, all green |
-| Gate | `make check` — ruff, format, mypy strict, pytest, Go build/vet/test |
-| Measured | divergence, vLLM invariance + cost, SGLang 2×2 decomposition |
-| Built, unmeasured | BARRIER: plugin compiles and is tested; cluster never stood up |
-| Spend | ~$2.00 of $20 |
-
-The single highest-value thing you can do is step 1. Everything else is optional.
+  committed.
+- **More engines.** SGLang is a control arm, not coverage. A third engine would
+  add breadth to a project whose value is depth.
+- **Making the finding record shorter.** Fourteen defects are recorded, four of
+  them guards that contained the defect they were written to catch, and one a
+  claim this project made and then withdrew. That record is the most credible
+  thing here precisely because nobody would invent it.

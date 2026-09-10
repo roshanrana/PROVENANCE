@@ -72,6 +72,20 @@ What you will see:
 
 Read it for the precise claim: a configuration and threat-model gap in the default deployment posture, demonstrated against a cluster the project controls. Not a zero-day, not a kernel exploit, not a claim about anyone's production system.
 
+## Query the code graph
+
+The repo carries an offline, tree-sitter-built code knowledge graph (`graphify`, no LLM, no
+network) that answers dependency and connection questions with file:line citations instead of a
+grep sweep. See [`docs/graph/README.md`](graph/README.md) for the how-to and three worked
+queries — among them, the shortest path from the EPP plugin's per-request hook to the
+tenant-salt derivation it calls:
+
+```
+$ graphify path "RequestHeader" "DeriveSalt"
+Shortest path (2 hops):
+  .RequestHeader() --calls [EXTRACTED]--> .saltFor() --calls [INFERRED]--> DeriveSalt()
+```
+
 ## Things worth noticing
 
 - **Three assumptions in the original brief were overturned by reading source**, and each is recorded: `cache_salt` already exists; out-of-tree plugins work because `Register` and `Registry` are exported; the salt reaches vLLM's cache if the plugin rewrites the outbound body. Any one of these, missed, would have shipped a project that a reviewer familiar with llm-d could dismiss in thirty seconds.

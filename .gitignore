@@ -21,3 +21,7 @@ bench/results/**/tenant-keys/
 _incoming.tgz
 _m*.tgz
 _to_delete/
+
+# graphify: keep the human-readable report, drop the derived graph data.
+graphify-out/*
+!graphify-out/GRAPH_REPORT.md

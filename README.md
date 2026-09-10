@@ -271,6 +271,9 @@ No services, no database. Eight components, all CLIs and libraries over files
 under git — because traceability is the requirement, and a database puts published
 numbers behind something that can drift.
 
+The repo also carries a queryable code knowledge graph for agents working in it — see
+[`docs/graph/README.md`](docs/graph/README.md).
+
 ---
 
 ## How this is built

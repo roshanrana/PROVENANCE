@@ -13,7 +13,7 @@ EPP_DIR := barrier/epp
 
 .PHONY: help bootstrap check check-full check-ship fmt lint typecheck test \
         go-check attest-demo attest-stage1 attest-stage2 \
-        barrier-up barrier-spike barrier-diff barrier-down headline card card-check clean
+        barrier-up barrier-spike barrier-diff barrier-down headline card card-check clean graph
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -103,3 +103,6 @@ barrier-down: ## Delete the kind cluster
 clean: ## Remove caches and demo artefacts
 	rm -rf .mypy_cache .pytest_cache .ruff_cache .coverage coverage.xml htmlcov
 	find . -name __pycache__ -type d -prune -exec rm -rf {} +
+
+graph: ## Rebuild the offline code knowledge graph (see docs/graph/README.md)
+	graphify update . && graphify cluster-only . --no-viz --no-label

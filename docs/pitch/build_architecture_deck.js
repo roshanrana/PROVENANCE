@@ -355,14 +355,14 @@ function caption(s, text, x, y, w) {
   });
   table(s, [
     ["KPI", "Value", "Source"],
-    ["Python tests", "331 passed, 1 failed (Windows-only) of 332", "uv run pytest -q"],
-    ["Go tests (barrier/epp)", "19 funcs / 26 with subtests, all pass", "go build && go vet && go test"],
-    ["ADRs / findings logged", "12 / 27 (4 self-catching guards)", "decisions.md, STATE.md"],
-    ["Cross-tenant leak (default)", "AUC 1.0000, p=9.999e-05, n=80", "ADR-012, CI run #15"],
-    ["Mitigation (hardened)", "AUC 0.5000, at chance, n=80", "ADR-012, CI run #15"],
+    ["Python tests", "331 passed, 1 failed (Windows-only) of 332", "pytest, this run"],
+    ["Go tests (barrier/epp)", "19 funcs / 26 with subtests, all pass", "go test, this run"],
+    ["ADRs / findings logged", "12 / 27 (4 self-catching guards)", "decisions.md"],
+    ["Cross-tenant leak (default)", "AUC 1.0000, p=9.999e-05, n=80", "ADR-012, run #15"],
+    ["Mitigation (hardened)", "AUC 0.5000, at chance, n=80", "ADR-012, run #15"],
     ["Determinism cost, isolated", "18.0% (SGLang, D/B = 0.820×)", "ADR-009, H100"],
-    ["Determinism cost, confounded", "22.7%, 95% CI [0.741, 0.808] (vLLM)", "bench/results/cost-h100"],
-  ], 5.9, 1.3, 3.6, [1.55, 1.35, 0.7], 7.3);
+    ["Determinism cost, confounded", "22.7%, 95% CI [0.741, 0.808] (vLLM)", "bench/results"],
+  ], 5.9, 1.3, 3.6, [1.45, 1.35, 0.8], 7.3);
   s.addText("The one Python failure asserts a 0600 file-mode; Windows filesystems do not enforce that bit the way POSIX does. Confirmed pre-existing and platform-specific during this review — not a defect in the path CI actually runs (ubuntu-latest).", { x: 0.5, y: 4.9, w: 9, h: 0.35, fontFace: BF, fontSize: 9, italic: true, color: MUTED, isTextBox: true, margin: 0 });
 }
 
